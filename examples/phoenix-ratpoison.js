@@ -173,6 +173,20 @@ var yabaiRatpoison = (function () {
         bind('f', ['shift'], function () { load('frames'); });
         if (space.type !== 'ratpoison') return;
         var args = ['space', String(space.index)];
+        [['h', 'horizontal:-40'], ['l', 'horizontal:40'], ['k', 'vertical:-40'], ['j', 'vertical:40']].forEach(function (entry) {
+            bind(entry[0], ['shift'], function () { update(args.concat(['--resize-frame', entry[1]])); });
+        });
+        bind('e', ['shift'], function () {
+            clearKeys();
+            bind('escape', [], function () { load('windows'); });
+            [['h', 'horizontal'], ['v', 'vertical'], ['b', 'both']].forEach(function (entry) {
+                bind(entry[0], [], function () { update(args.concat(['--equalize-frames', entry[1]])); });
+            });
+            [['1', '1:2'], ['2', '1:1'], ['3', '2:1']].forEach(function (entry) {
+                bind(entry[0], [], function () { update(args.concat(['--frame-ratio', 'horizontal:' + entry[1]])); });
+            });
+            show('Frame sizes\nh equal widths   v equal heights   b both\nLeft:right widths:  1 = 1:2   2 = 1:1   3 = 2:1\nEsc back');
+        });
         bind('s', ['shift'], function () { update(args.concat(['--split', 'horizontal'])); });
         bind('v', ['shift'], function () { update(args.concat(['--split', 'vertical'])); });
         bind('r', ['shift'], function () { update(args.concat(['--remove-frame'])); });
@@ -202,7 +216,7 @@ var yabaiRatpoison = (function () {
         var columns = screen.width >= 1100 ? 2 : 1;
         // Allow the panel to grow to 90% of the usable height. Reserve text
         // rows for headings, controls and a permanent pagination status line.
-        var chromeRows = space.type === 'ratpoison' ? 9 : 7;
+        var chromeRows = space.type === 'ratpoison' ? 10 : 7;
         var lineBudget = Math.floor((Math.min(screen.height * 0.9, screen.height - 32) - 28) / 18);
         var rows = Math.max(1, lineBudget - chromeRows - 2);
         var columnWidth = Math.max(12, Math.min(66, Math.floor((screen.width - 132) / (columns * 8)) - 3));
@@ -267,7 +281,8 @@ var yabaiRatpoison = (function () {
                    ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
         lines.push('', '[ / PgUp prev   ] / PgDn / Space next   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-D/U screens');
         if (space.type === 'ratpoison') {
-            lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next');
+            lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next',
+                       'Shift-H/L width   Shift-K/J height   Shift-E sizes');
         }
         function previousPage() { choices(entries, title, space, windows, choose, page - 1); }
         function nextPage() { choices(entries, title, space, windows, choose, page + 1); }

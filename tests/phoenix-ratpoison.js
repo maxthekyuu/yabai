@@ -136,7 +136,7 @@ open(manySpace(), many);
 assert.ok(lastMenu.text.split('\n').length * 18 + 28 <= screen.height * 0.9);
 assert.deepEqual(lastMenu.screen, screen);
 assert.ok(lastMenu.text.split('\n').every(line => line.length <= 70));
-press(']'); press('0'); expectCommand(['window', '--focus', '13']); reply(null); idle();
+press(']'); press('0'); expectCommand(['window', '--focus', '12']); reply(null); idle();
 // Display and Space containers are available in every layout. Move + follow
 // waits for WindowServer completion and keeps layout controls on the destination.
 screen = { x: 0, y: 0, width: 1400, height: 1000 };
@@ -371,6 +371,23 @@ const crowded = Array.from({length: 60}, (_, i) => ({id: 2000+i,index: i+1,displ
 open(); press('m', ['shift']); refresh(); reply(threeDisplays); reply([...crowded, remote, thirdSpace]);
 assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1,2,3]);
 press('escape'); idle();
+// Resize the selected frame without depending on a focused application window.
+for (const [key, amount] of [['h','horizontal:-40'],['l','horizontal:40'],['k','vertical:-40'],['j','vertical:40']]) {
+    open(space, []); press(key, ['shift']); expectCommand(['space','2','--resize-frame',amount]);
+    reply(null); refresh(); press('escape'); idle();
+}
+for (const [key, axis] of [['h','horizontal'],['v','vertical'],['b','both']]) {
+    open(); press('e', ['shift']); press(key); expectCommand(['space','2','--equalize-frames',axis]);
+    reply(null); refresh(); press('escape'); idle();
+}
+open(); press('e', ['shift']); press('escape'); refresh(); press('escape'); idle();
+// Fixed ratios describe left:right regardless of the selected side; numbers
+// in the sizes submenu do not trigger the main menu's layout shortcuts.
+for (const [key, ratio] of [['1','1:2'],['2','1:1'],['3','2:1']]) {
+    open(space, []); press('e', ['shift']); press(key);
+    expectCommand(['space','2','--frame-ratio','horizontal:' + ratio]);
+    reply(null); refresh(); press('escape'); idle();
+}
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

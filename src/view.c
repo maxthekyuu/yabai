@@ -186,7 +186,8 @@ static void area_make_pair(enum window_node_split split, int gap, float ratio, s
 static void area_make_pair_for_node(struct view *view, struct window_node *node)
 {
     enum window_node_split split = window_node_get_split(view, node);
-    float ratio = window_node_get_ratio(node);
+    float ratio = view->layout == VIEW_RATPOISON && isfinite(node->ratio) && node->ratio > 0 && node->ratio < 1
+                ? node->ratio : window_node_get_ratio(node);
     int gap     = window_node_get_gap(view);
 
     area_make_pair(split, gap, ratio, &node->area, &node->left->area, &node->right->area);

@@ -28,7 +28,10 @@ typedef TEST_SIG(function);
     TEST_ENTRY(ratpoison_directional_frames)                    \
     TEST_ENTRY(ratpoison_recall_covered_window)                  \
     TEST_ENTRY(frame_border_geometry_and_rendering)             \
-    TEST_ENTRY(frame_border_config_validation)
+    TEST_ENTRY(frame_border_config_validation)                   \
+    TEST_ENTRY(ratpoison_resize_and_equalize)                    \
+    TEST_ENTRY(ratpoison_equalize_nested_columns)                 \
+    TEST_ENTRY(ratpoison_fixed_frame_ratios)
 
 static struct {
     char *name;

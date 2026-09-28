@@ -117,6 +117,9 @@ extern bool g_verbose;
 #define COMMAND_SPACE_GAP      "--gap"
 #define COMMAND_SPACE_TOGGLE   "--toggle"
 #define COMMAND_SPACE_LAYOUT   "--layout"
+#define COMMAND_SPACE_FRAME_RATIO "--frame-ratio"
+#define COMMAND_SPACE_RESIZE_FRAME "--resize-frame"
+#define COMMAND_SPACE_EQUALIZE_FRAMES "--equalize-frames"
 #define COMMAND_SPACE_SPLIT        "--split"
 #define COMMAND_SPACE_FOCUS_FRAME  "--focus-frame"
 #define COMMAND_SPACE_REMOVE_FRAME "--remove-frame"
@@ -2127,6 +2130,9 @@ static void handle_domain_space(FILE *rsp, struct token domain, char *message)
                 daemon_fail(rsp, "unknown value '%.*s' given to command '%.*s' for domain '%.*s'\n", value.length, value.text, command.length, command.text, domain.length, domain.text);
             }
         } else if (token_equals(command, COMMAND_SPACE_SPLIT) ||
+                   token_equals(command, COMMAND_SPACE_FRAME_RATIO) ||
+                   token_equals(command, COMMAND_SPACE_RESIZE_FRAME) ||
+                   token_equals(command, COMMAND_SPACE_EQUALIZE_FRAMES) ||
                    token_equals(command, COMMAND_SPACE_FOCUS_FRAME) ||
                    token_equals(command, COMMAND_SPACE_REMOVE_FRAME) ||
                    token_equals(command, COMMAND_SPACE_ONLY_FRAME)) {
@@ -2145,7 +2151,28 @@ static void handle_domain_space(FILE *rsp, struct token domain, char *message)
                 focus_ratpoison_frame(view, node);
             } else {
                 bool success;
-                if (token_equals(command, COMMAND_SPACE_SPLIT)) {
+                if (token_equals(command, COMMAND_SPACE_RESIZE_FRAME)) {
+                    struct token value = get_token(&message);
+                    char axis[16], trailing;
+                    float delta;
+                    success = token_is_valid(value) && sscanf(value.text, "%15[^:]:%f%c", axis, &delta, &trailing) == 2 &&
+                              view_ratpoison_resize_frame(view, strcmp(axis, "horizontal") == 0 ? SPLIT_Y :
+                                                               strcmp(axis, "vertical") == 0 ? SPLIT_X : SPLIT_NONE, delta);
+                } else if (token_equals(command, COMMAND_SPACE_FRAME_RATIO)) {
+                    struct token value = get_token(&message);
+                    char axis[16], trailing;
+                    float first, second;
+                    success = token_is_valid(value) && sscanf(value.text, "%15[^:]:%f:%f%c", axis, &first, &second, &trailing) == 3 &&
+                              isfinite(first) && isfinite(second) && first > 0 && second > 0 &&
+                              view_ratpoison_set_frame_ratio(view, strcmp(axis, "horizontal") == 0 ? SPLIT_Y :
+                                                                  strcmp(axis, "vertical") == 0 ? SPLIT_X : SPLIT_NONE,
+                                                            (float)(first / ((double)first + second)));
+                } else if (token_equals(command, COMMAND_SPACE_EQUALIZE_FRAMES)) {
+                    struct token value = get_token(&message);
+                    uint32_t axes = token_equals(value, "horizontal") ? SPLIT_Y : token_equals(value, "vertical") ? SPLIT_X :
+                                    token_equals(value, "both") ? SPLIT_X | SPLIT_Y : SPLIT_NONE;
+                    success = view_ratpoison_equalize_frames(view, axes);
+                } else if (token_equals(command, COMMAND_SPACE_SPLIT)) {
                     struct token value = get_token(&message);
                     enum window_node_split split = token_equals(value, "vertical") ? SPLIT_Y
                                                  : token_equals(value, "horizontal") ? SPLIT_X : SPLIT_NONE;
@@ -2156,7 +2183,7 @@ static void handle_domain_space(FILE *rsp, struct token domain, char *message)
                     success = view_ratpoison_only_frame(view);
                 }
                 if (!success) {
-                    daemon_fail(rsp, "cannot change frames: invalid split, insufficient space, last frame, or stack capacity exceeded.\n");
+                    daemon_fail(rsp, "cannot change frames: invalid argument, missing divider, insufficient space, last frame, or stack capacity exceeded.\n");
                     return;
                 }
                 view_flush(view);

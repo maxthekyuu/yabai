@@ -46,6 +46,55 @@ regions. `auto_balance` does not rearrange frames on window arrival or departure
 Use the existing window ratio/resize commands to adjust splits. BSP insertion,
 warp, swap, zoom, and mouse-drop tree editing remain restricted to BSP.
 
+## Resizing frames
+
+Frame resizing acts on the selected frame, including an empty frame, and moves
+its nearest divider on the chosen axis. Sizes are relative logical points:
+
+```sh
+yabai -m space --resize-frame horizontal:40   # grow selected frame width
+yabai -m space --resize-frame horizontal:-40  # shrink width
+yabai -m space --resize-frame vertical:40     # grow height
+yabai -m space --equalize-frames horizontal   # equalize widths
+yabai -m space --equalize-frames vertical     # equalize heights
+yabai -m space --equalize-frames both
+```
+
+`horizontal` means width and `vertical` means height for these commands.
+Equalization distributes space evenly among parallel slots within the existing
+tree, accounting for gaps; it does not rearrange frames or move windows between
+frames. For three nested columns this produces three equal widths (within pixel
+rounding), rather than making every divider 50/50. Perpendicular branches share
+space, so mixed trees retain their existing partition structure. Only the chosen
+axis changes. Frame ids, stacks, and selection remain intact.
+
+Resizing a single root frame, or an axis without a divider, is rejected.
+Changes that cannot fit every frame's borders plus at least one content point
+are rejected without partial changes. Applications can still enforce their own
+minimum window sizes.
+
+Within the prefix menu, **Shift-H/L** shrinks/grows width by 40 points and
+**Shift-K/J** shrinks/grows height by 40 points. **Shift-E** opens equalization:
+`h` for equal widths, `v` for equal heights, `b` for both. The same size menu
+has left:right width presets: `1` = **1:2**, `2` = **1:1**, `3` = **2:1**.
+Escape returns to the chooser. These numbers select ratios only inside the size
+menu; the main menu still uses them for layouts. These controls refresh the menu and centered labels after each change.
+
+Fixed ratios also work through the CLI:
+
+```sh
+yabai -m space --frame-ratio horizontal:1:2 # left third, right two-thirds
+yabai -m space --frame-ratio horizontal:2:1 # left two-thirds, right third
+yabai -m space --frame-ratio horizontal:1:1 # equal left/right split
+yabai -m space --frame-ratio vertical:1:2   # top third, bottom two-thirds
+```
+
+Ratios divide the space remaining after the gap, and always mean left:right
+(horizontal) or top:bottom (vertical), regardless of which side is selected.
+With more than two frames, they apply to the selected frame's nearest divider
+on that axis; sibling subtrees resize with it. Positive numeric weights are
+supported. Border/content minimums still apply, with invalid changes rejected.
+
 ## Frame borders
 
 Native borders outline every ratpoison frame, including empty frames. They are

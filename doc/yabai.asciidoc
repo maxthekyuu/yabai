@@ -371,6 +371,15 @@ COMMAND
 *--layout* 'bsp|stack|float|ratpoison'::
     Set the layout of the selected space. Ratpoison starts with one frame; new windows stack in the selected frame and closing windows preserves empty frames. Frame ids remain stable until removed or the layout is reset. Automatic balancing is ignored for window additions and removals. Frames are kept in memory, not saved across daemon restarts.
 
+*--resize-frame* 'horizontal:<points>|vertical:<points>'::
+    Resize the selected ratpoison frame, including an empty frame. Positive points grow width (horizontal) or height (vertical); negative points shrink it. Moves the nearest divider on that axis. Rejects changes that cannot fit all frame borders and content.
+
+*--frame-ratio* 'horizontal:<left>:<right>|vertical:<top>:<bottom>'::
+    Set the selected ratpoison frame's nearest split on the chosen axis to positive numeric weights. For example horizontal:1:2 gives the left side one third and the right side two thirds of the available width after the gap. Ordering is independent of selection. Rejects ratios that cannot fit frame borders and content.
+
+*--equalize-frames* 'horizontal|vertical|both'::
+    Equalize ratpoison frame widths, heights, or both within the existing tree, accounting for gaps. Preserves frame ids, selection, and window stacks.
+
 *--split* 'vertical|horizontal'::
     Ratpoison only: split the selected frame immediately, retaining its windows and id in the left/top child. The right/bottom child starts empty with a new id. Uses split_ratio and window_gap. Selection stays in the original frame.
 
