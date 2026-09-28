@@ -309,6 +309,31 @@ See \c
 for details.
 .RE
 .sp
+\fBframe_border\fP [\fIon|off\fP]
+.RS 4
+Draw native borders around ratpoison frames, including empty frames. Global setting; default on.
+.RE
+.sp
+\fBframe_border_width\fP [\fI1..64\fP]
+.RS 4
+Border width in logical points. Default 3. Window placement reserves this width inside each frame.
+.RE
+.sp
+\fBactive_frame_border_color\fP [\fI0xAARRGGBB\fP]
+.RS 4
+Selected ratpoison frame containing the focused window. Default 0xff55ff55.
+.RE
+.sp
+\fBinactive_frame_border_color\fP [\fI0xAARRGGBB\fP]
+.RS 4
+Other ratpoison frames. Default 0xff555555.
+.RE
+.sp
+\fBselected_empty_border_color\fP [\fI0xAARRGGBB\fP]
+.RS 4
+Selected empty ratpoison frame. Default 0xff5555ff (blue).
+.RE
+.sp
 \fBinsert_feedback_color\fP [\fI0xAARRGGBB\fP]
 .RS 4
 Color of the \fBwindow \-\-insert\fP message and mouse_drag selection.

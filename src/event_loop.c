@@ -708,8 +708,9 @@ static EVENT_HANDLER(WINDOW_MOVED)
             struct view *view = window_manager_find_managed_window(&g_window_manager, window);
             if (view) {
                 struct window_node *node = view_find_window_node(view, window->id);
-                if (node && (AX_DIFF(node->area.x, new_origin.x) ||
-                             AX_DIFF(node->area.y, new_origin.y))
+                struct area area = node ? window_node_content_area(node) : (struct area) {0};
+                if (node && (AX_DIFF(area.x, new_origin.x) ||
+                             AX_DIFF(area.y, new_origin.y))
                          &&
                    (!node->zoom || AX_DIFF(node->zoom->area.x, new_origin.x) ||
                                    AX_DIFF(node->zoom->area.y, new_origin.y))) {
@@ -807,10 +808,11 @@ static EVENT_HANDLER(WINDOW_RESIZED)
                 struct view *view = window_manager_find_managed_window(&g_window_manager, window);
                 if (view) {
                     struct window_node *node = view_find_window_node(view, window->id);
-                    if (node && (AX_DIFF(node->area.x, new_frame.origin.x)   ||
-                                 AX_DIFF(node->area.y, new_frame.origin.y)   ||
-                                 AX_DIFF(node->area.w, new_frame.size.width) ||
-                                 AX_DIFF(node->area.h, new_frame.size.height))
+                    struct area area = node ? window_node_content_area(node) : (struct area) {0};
+                    if (node && (AX_DIFF(area.x, new_frame.origin.x)   ||
+                                 AX_DIFF(area.y, new_frame.origin.y)   ||
+                                 AX_DIFF(area.w, new_frame.size.width) ||
+                                 AX_DIFF(area.h, new_frame.size.height))
                              &&
                        (!node->zoom || AX_DIFF(node->zoom->area.x, new_frame.origin.x)   ||
                                        AX_DIFF(node->zoom->area.y, new_frame.origin.y)   ||
@@ -1672,6 +1674,9 @@ static void *event_loop_run(void *context)
 #undef EVENT_TYPE_ENTRY
             }
 
+            // Own frame overlays follow selection, geometry, and Space/Mission
+            // Control transitions. Cached signatures avoid unnecessary drawing.
+            frame_border_refresh_all();
             event_signal_flush();
             ts_reset();
 

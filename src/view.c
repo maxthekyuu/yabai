@@ -193,6 +193,8 @@ static void area_make_pair_for_node(struct view *view, struct window_node *node)
 
     node->split = split;
     node->ratio = ratio;
+    node->left->border_width = frame_border_inset(view, node->left->area);
+    node->right->border_width = frame_border_inset(view, node->right->area);
 }
 
 static inline bool window_node_is_occupied(struct window_node *node)
@@ -323,6 +325,7 @@ static void window_node_split(struct view *view, struct window_node *node, struc
 
 void window_node_update(struct view *view, struct window_node *node)
 {
+    node->border_width = frame_border_inset(view, node->area);
     if (window_node_is_leaf(node)) {
         if (node->insert_dir) insert_feedback_show(node);
     } else {
@@ -355,13 +358,23 @@ static void window_node_clear_zoom(struct window_node *node)
     }
 }
 
+struct area window_node_content_area(struct window_node *node)
+{
+    struct area area = node->zoom ? node->zoom->area : node->area;
+    area.x += node->border_width;
+    area.y += node->border_width;
+    area.w -= 2 * node->border_width;
+    area.h -= 2 * node->border_width;
+    return area;
+}
+
 void window_node_capture_windows(struct window_node *node, struct window_capture **window_list)
 {
     if (window_node_is_leaf(node)) {
         for (int i = 0; i < node->window_count; ++i) {
             struct window *window = window_manager_find_window(&g_window_manager, node->window_list[i]);
             if (window) {
-                struct area area = node->zoom ? node->zoom->area : node->area;
+                struct area area = window_node_content_area(node);
                 ts_buf_push(*window_list, ((struct window_capture) { .window = window, .x = area.x, .y = area.y, .w = area.w, .h = area.h }));
             }
         }
@@ -986,7 +999,9 @@ void view_serialize(FILE *rsp, struct view *view, uint64_t flags)
                 for (int i = 0; i < node->window_count; ++i) {
                     fprintf(rsp, "%s%u", i ? "," : "", node->window_list[i]);
                 }
-                fprintf(rsp, "],\"active-window\":%u}", node->window_order[0]);
+                struct area content = window_node_content_area(node);
+                fprintf(rsp, "],\"active-window\":%u,\"border-width\":%.4f,\"content\":{\"x\":%.4f,\"y\":%.4f,\"w\":%.4f,\"h\":%.4f}}",
+                        node->window_order[0], node->border_width, content.x, content.y, content.w, content.h);
             }
         }
         fprintf(rsp, "]");
@@ -1047,6 +1062,7 @@ struct view *view_create(uint64_t sid)
 
 void view_clear(struct view *view)
 {
+    frame_border_destroy(view);
     view->selected_frame = NULL;
     view->next_frame_id = 1;
     if (view->root) {
@@ -1065,6 +1081,7 @@ void view_clear(struct view *view)
 
 void view_destroy(struct view *view)
 {
+    frame_border_destroy(view);
     if (view->root) {
         window_node_destroy(view->root);
     }
