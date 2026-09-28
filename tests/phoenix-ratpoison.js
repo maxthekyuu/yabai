@@ -145,7 +145,7 @@ function resolveDestination(spaces = desktops, screens = displays) {
 }
 for (const type of ['ratpoison', 'float', 'bsp']) {
     destinations('d', { ...space, type });
-    assert.ok(lastMenu.text.includes('D2 External / S3 [float]'));
+    assert.ok(lastMenu.text.includes('S3 (2) External [float]'));
     press('4'); resolveDestination();
     expectCommand(['query', '--spaces', '--space']); reply(space);
     expectCommand(['space', '--focus', '3']); reply(null);
@@ -155,6 +155,8 @@ for (const type of ['ratpoison', 'float', 'bsp']) {
 for (const type of ['ratpoison', 'float', 'bsp']) {
     destinations('m', { ...space, type });
     assert.ok(!lastMenu.text.includes('S5'));
+    assert.ok(lastMenu.text.includes('S2 (1)'));
+    assert.ok(lastMenu.text.includes('S4 (2) [bsp]'));
     // Frames precede D1, S2, D2, S3, S4 in ratpoison; other layouts start at D1.
     press(type === 'ratpoison' ? '7' : '5');
     resolveDestination();

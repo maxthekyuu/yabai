@@ -102,16 +102,17 @@ direction; BSP uses yabai's existing managed-window navigation.
 
 Display and Space containers are available in every layout. `Super-S`, then
 `Shift-M`, opens a destination list: local ratpoison frames first, followed by
-physical displays (`D`) and their virtual desktops (`S`). Each display entry
+physical display shortcuts and their virtual desktops. Each display entry
 represents its currently visible Space. Space entries also include desktops
 that are not currently visible; native fullscreen Spaces are excluded.
-Labels show the destination's current layout and any configured display/Space
-label. Use `[` and `]` to page through long destination lists.
+Labels lead with the virtual desktop number and the physical display number in
+parentheses: `S1 (1)` means Space 1 on display 1. The current layout and any
+configured display/Space label follow. Use `[` and `]` to page through long destination lists.
 
 For example, to send a window to a floating external display and start tiling:
 
 1. Focus the window, press `Super-S`, then `Shift-M`.
-2. Choose the external display's `D` entry.
+2. Choose the external display's visible Space, shown as `Sx (display number)`.
 3. After the window moves and receives focus there, press `1` for ratpoison,
    `2` for floating, or `3` for BSP. The menu stays open after arrival.
 

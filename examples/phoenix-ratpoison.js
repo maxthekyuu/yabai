@@ -253,15 +253,14 @@ var yabaiRatpoison = (function () {
                     var visible = desktops.filter(function (item) { return item['is-visible']; })[0];
                     if (mode !== 'spaces' && visible && !visible['is-native-fullscreen']) {
                         entries.push({ display: display.index, displayId: display.id, space: visible,
-                            label: (display['has-focus'] ? '*' : ' ') + ' D' + display.index +
-                                (display.label ? ' ' + clean(display.label) : '') +
-                                ' / S' + visible.index + ' [' + visible.type + ']' });
+                            label: (display['has-focus'] ? '*' : ' ') + ' S' + visible.index + ' (' + display.index + ')' +
+                                (display.label ? ' ' + clean(display.label) : '') + ' [' + visible.type + ']' });
                     }
                     if (mode !== 'displays') {
                         desktops.filter(function (item) { return !item['is-native-fullscreen']; })
                             .sort(function (a, b) { return a.index - b.index; }).forEach(function (item) {
                                 entries.push({ space: item, label: (item['has-focus'] ? '*' : ' ') +
-                                    ' D' + display.index + ' / S' + item.index +
+                                    ' S' + item.index + ' (' + display.index + ')' +
                                     (item.label ? ' ' + clean(item.label) : '') + ' [' + item.type + ']' });
                             });
                     }
