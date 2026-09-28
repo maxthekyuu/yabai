@@ -425,6 +425,42 @@ expectCommand(['query','--windows','--window','99']); reply({id:99,space:4,'is-m
 expectCommand(['window','--deminimize','99']); reply(null); reply({id:99,space:4,'is-minimized':false});
 expectCommand(['window','--focus','99']); reply(null); refresh(desktop); press('escape'); idle();
 open(); press('/'); press('escape'); reply(desktops); assert.equal(tasks.length,0); idle();
+// The move chooser must include a remote empty frame, even when its source
+// is on another display or uses a different layout.
+const moveTargetSpace = { ...remote, type:'ratpoison', frames:[
+    {id:0,selected:true,windows:Array.from({length:32},(_,i)=>200+i),x:-1000,y:0,w:500,h:700},
+    {id:4,selected:false,windows:[300],x:-500,y:0,w:500,h:350},
+    {id:3,selected:false,windows:[],x:-500,y:350,w:500,h:350}
+]};
+const moveSpaces = [space, moveTargetSpace, desktop];
+function openRemoteMove(type = 'ratpoison') {
+    const sourceSpace = {...space,type};
+    open(sourceSpace); press('m',['shift']); refresh(sourceSpace); reply(displays); reply(moveSpaces);
+    assert.ok(lastMenu.text.includes('S3 (2) F3 [empty]'));
+    const target = lastMenu.badges.find(b=>b.display===2 && b.rect.y===350);
+    assert.ok(target, 'Remote empty frame must have a matching centered label');
+    press(target.key); expectCommand(['query','--spaces']);
+}
+for (const type of ['ratpoison','float','bsp']) {
+    openRemoteMove(type); reply(moveSpaces); reply(space);
+    expectCommand(['space','--focus','3']); reply(null); reply(moveTargetSpace);
+    expectCommand(['space','3','--focus-frame','3']); reply(null);
+    expectCommand(['window','10','--space','3']); reply(null);
+    expectCommand(['query','--windows','--window','10']); reply({id:10,space:3});
+    expectCommand(['window','10','--frame','3']); reply(null);
+    expectCommand(['window','--focus','10']); reply(null);
+    refresh(moveTargetSpace); press('escape'); idle();
+}
+// Stale or full frame targets fail before switching or moving anything.
+for (const frames of [moveTargetSpace.frames.filter(f=>f.id!==3),
+                      moveTargetSpace.frames.map(f=>f.id===3?{...f,windows:Array.from({length:32},(_,i)=>400+i)}:f)]) {
+    openRemoteMove(); reply([space,{...moveTargetSpace,frames}]);
+    assert.equal(tasks.length,0); context.yabaiRatpoison.cancel(); idle();
+}
+// Cancellation while selecting the remote frame must not subsequently transfer.
+openRemoteMove(); reply(moveSpaces); reply(space); reply(null); reply(moveTargetSpace);
+expectCommand(['space','3','--focus-frame','3']); press('escape'); reply(null);
+assert.equal(tasks.length,0); idle();
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

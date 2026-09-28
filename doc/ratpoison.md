@@ -231,7 +231,7 @@ continues to operate within the active Space. Use selection labels to cross disp
 
 
 Display and Space containers are available in every layout. `Super-S`, then
-`Shift-M`, opens a destination list: local ratpoison frames first, followed by
+`Shift-M`, opens a destination list: ratpoison frames from every currently visible Space, plus
 physical display shortcuts and their virtual desktops. Each display entry
 represents its currently visible Space. Space entries also include desktops
 that are not currently visible; native fullscreen Spaces are excluded.
@@ -246,7 +246,10 @@ For example, to send a window to a floating external display and start tiling:
 3. After the window moves and receives focus there, press `1` for ratpoison,
    `2` for floating, or `3` for BSP. The menu stays open after arrival.
 
-Moving to a ratpoison Space uses its selected frame; the source frame remains
+Choosing a specific remote frame activates that Space and selects the frame
+before moving the window there. Empty frames are listed first within remote
+frame targets. Missing or full targets are rejected before moving.
+Moving to a ratpoison Space without choosing a frame uses its selected frame; the source frame remains
 in place even when empty. Moving to another layout uses yabai's normal placement.
 `Shift-D` and `Shift-U` let you visit containers without moving a window, including
 empty desktops, then change their layout with the same number keys.

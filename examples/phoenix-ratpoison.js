@@ -359,13 +359,28 @@ var yabaiRatpoison = (function () {
                 var entries = [];
                 if (mode === 'move' && space.type === 'ratpoison') {
                     (space.frames || []).forEach(function (frame) {
-                        entries.push({ frame: frame.id, rect: frameRect(frame), label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
+                        entries.push({ frame: frame.id, space: space, rect: frameRect(frame), label: 'S' + space.index + ' (' + space.display + ') ' + (frame.selected ? '*' : ' ') + ' F' + frame.id +
                             (frame.windows.length ? ' [' + frame.windows.length + ' windows]' : ' [empty]') });
                     });
                 }
                 displays.sort(function (a, b) { return a.index - b.index; }).forEach(function (display) {
                     var desktops = spaces.filter(function (item) { return item.display === display.index; });
                     var visible = desktops.filter(function (item) { return item['is-visible']; })[0];
+                    if (mode === 'move') {
+                        desktops.filter(function (item) {
+                            return item.id !== space.id && item['is-visible'] && item.type === 'ratpoison';
+                        }).forEach(function (item) {
+                            // Empty destinations come first so a full source display
+                            // cannot bury the most useful remote targets on later pages.
+                            (item.frames || []).slice().sort(function (a, b) {
+                                return Number(a.windows.length > 0) - Number(b.windows.length > 0);
+                            }).forEach(function (frame) {
+                                entries.push({ frame: frame.id, space: item, visibleOnly: true, rect: frameRect(frame),
+                                    label: 'S' + item.index + ' (' + item.display + ') F' + frame.id +
+                                        (frame.windows.length ? ' [' + frame.windows.length + ' windows]' : ' [empty]') });
+                            });
+                        });
+                    }
                     if (mode !== 'spaces' && visible && !visible['is-native-fullscreen']) {
                         entries.push({ display: display.index, displayId: display.id, space: visible, rect: display.frame,
                             label: (display['has-focus'] ? '*' : ' ') + ' S' + visible.index + ' (' + display.index + ')' +
@@ -381,7 +396,7 @@ var yabaiRatpoison = (function () {
                     }
                 });
                 choices(entries, mode === 'move' ? 'move + follow' : 'focus ' + mode, space, windows, function (entry) {
-                    if (entry.frame !== undefined) {
+                    if (entry.frame !== undefined && entry.space.id === space.id) {
                         update(['window', String(source.id), '--frame', String(entry.frame)]);
                     } else {
                         visit(entry, mode === 'move' ? source : null);
@@ -431,6 +446,12 @@ var yabaiRatpoison = (function () {
                 })[0];
                 if (!target || (entry.visibleOnly && !target['is-visible']) ||
                     (target['is-native-fullscreen'] && !entry.visibleOnly && !entry.searchable)) { error('destination is no longer available'); return; }
+                if (entry.frame !== undefined) {
+                    var targetFrame = target.type === 'ratpoison' && (target.frames || []).filter(function (frame) { return frame.id === entry.frame; })[0];
+                    if (!targetFrame || (source && targetFrame.windows.length >= 32 && targetFrame.windows.indexOf(source.id) === -1)) {
+                        error('destination frame is gone or full'); return;
+                    }
+                }
                 function focusWindow() {
                     if (source) request(['window', '--focus', String(source.id)], function () { load('windows'); });
                     else if (entry.window !== undefined) {
@@ -462,17 +483,34 @@ var yabaiRatpoison = (function () {
                         request(['space', String(target.index), '--focus-frame', String(entry.frame)], function () { load('windows'); });
                     } else load('windows');
                 }
+                var arrival = focusWindow;
                 function focusSpace() {
                     request(['query', '--spaces', '--space'], function (task) {
                         var focused;
                         try { focused = JSON.parse(task.output); } catch (_) { error('invalid focused Space'); return; }
-                        if (focused.id === target.id) { focusWindow(); return; }
+                        if (focused.id === target.id) { arrival(); return; }
                         request(['space', '--focus', String(target.index)], function () {
-                            waitFor(['query', '--spaces', '--space'], function (item) { return item && item.id === target.id; }, focusWindow, 30);
+                            waitFor(['query', '--spaces', '--space'], function (item) { return item && item.id === target.id; }, arrival, 30);
                         });
                     });
                 }
                 if (!source) { focusSpace(); return; }
+                if (entry.frame !== undefined) {
+                    // Choose the destination frame before transferring, so tiling
+                    // admits the window there even if another frame is full.
+                    arrival = function () {
+                        request(['space', String(target.index), '--focus-frame', String(entry.frame)], function () {
+                            request(['window', String(source.id), '--space', String(target.index)], function () {
+                                waitFor(['query', '--windows', '--window', String(source.id)], function (window) {
+                                    return window && window.space === target.index;
+                                }, function () {
+                                    request(['window', String(source.id), '--frame', String(entry.frame)], focusWindow);
+                                }, 30);
+                            });
+                        });
+                    };
+                    focusSpace(); return;
+                }
                 request(['window', String(source.id), '--space', String(target.index)], function () {
                     waitFor(['query', '--windows', '--window', String(source.id)], function (window) {
                         return window && window.space === target.index;
