@@ -69,6 +69,7 @@ extern bool g_verbose;
 #define ARGUMENT_CONFIG_WINDOW_INSERT_FIRST   "first"
 #define ARGUMENT_CONFIG_WINDOW_INSERT_LAST    "last"
 #define ARGUMENT_CONFIG_SHADOW_FLT            "float"
+#define ARGUMENT_CONFIG_LAYOUT_RATPOISON      "ratpoison"
 #define ARGUMENT_CONFIG_LAYOUT_BSP            "bsp"
 #define ARGUMENT_CONFIG_LAYOUT_STACK          "stack"
 #define ARGUMENT_CONFIG_LAYOUT_FLOAT          "float"
@@ -111,6 +112,10 @@ extern bool g_verbose;
 #define COMMAND_SPACE_GAP      "--gap"
 #define COMMAND_SPACE_TOGGLE   "--toggle"
 #define COMMAND_SPACE_LAYOUT   "--layout"
+#define COMMAND_SPACE_SPLIT        "--split"
+#define COMMAND_SPACE_FOCUS_FRAME  "--focus-frame"
+#define COMMAND_SPACE_REMOVE_FRAME "--remove-frame"
+#define COMMAND_SPACE_ONLY_FRAME   "--only-frame"
 #define COMMAND_SPACE_LABEL    "--label"
 
 #define ARGUMENT_SPACE_ROTATE_90    "90"
@@ -128,6 +133,7 @@ extern bool g_verbose;
 /* ----------------------------------------------------------------------------- */
 
 /* --------------------------------DOMAIN WINDOW-------------------------------- */
+#define COMMAND_WINDOW_FRAME      "--frame"
 #define COMMAND_WINDOW_FOCUS      "--focus"
 #define COMMAND_WINDOW_CLOSE      "--close"
 #define COMMAND_WINDOW_MINIMIZE   "--minimize"
@@ -868,6 +874,56 @@ static struct selector parse_space_selector(FILE *rsp, char **message, uint64_t 
     return result;
 }
 
+static struct window_node *parse_frame_selector(FILE *rsp, struct view *view, struct token token)
+{
+    if (view->layout != VIEW_RATPOISON) {
+        daemon_fail(rsp, "frame commands require the ratpoison layout.\n");
+        return NULL;
+    }
+    struct window_node *node = view_ratpoison_selected_frame(view);
+    if (token_equals(token, "next")) {
+        struct window_node *next = window_node_find_next_leaf(node);
+        return next ? next : window_node_find_first_leaf(view->root);
+    }
+    if (token_equals(token, "prev")) {
+        struct window_node *prev = window_node_find_prev_leaf(node);
+        return prev ? prev : window_node_find_last_leaf(view->root);
+    }
+    if (token_equals(token, "first")) return window_node_find_first_leaf(view->root);
+    if (token_equals(token, "last")) return window_node_find_last_leaf(view->root);
+
+    int direction = token_equals(token, "north") ? DIR_NORTH
+                  : token_equals(token, "east")  ? DIR_EAST
+                  : token_equals(token, "south") ? DIR_SOUTH
+                  : token_equals(token, "west")  ? DIR_WEST : 0;
+    if (direction) {
+        node = view_ratpoison_frame_in_direction(view, direction);
+        if (node) return node;
+        daemon_fail(rsp, "could not locate a frame to the %.*s.\n", token.length, token.text);
+        return NULL;
+    }
+
+    unsigned id = 0;
+    if (token.length == 0) goto invalid;
+    for (int i = 0; i < token.length; ++i) {
+        unsigned digit = token.text[i] - '0';
+        if (digit > 9 || id > (UINT_MAX - digit) / 10) goto invalid;
+        id = id * 10 + digit;
+    }
+    node = view_ratpoison_find_frame(view, id);
+    if (node) return node;
+invalid:
+    daemon_fail(rsp, "could not locate frame '%.*s'.\n", token.length, token.text);
+    return NULL;
+}
+
+static void focus_ratpoison_frame(struct view *view, struct window_node *node)
+{
+    view->selected_frame = node;
+    struct window *window = window_manager_find_window(&g_window_manager, node->window_order[0]);
+    if (window) window_manager_focus_window_with_raise(&window->application->psn, window->id, window->ref);
+}
+
 static struct selector parse_window_selector(FILE *rsp, char **message, struct window *acting_window, bool optional)
 {
     TIME_FUNCTION;
@@ -1056,6 +1112,16 @@ static struct selector parse_window_selector(FILE *rsp, char **message, struct w
                 result.window = recent_window;
             } else {
                 daemon_fail(rsp, "could not locate the most recently focused window.\n");
+            }
+        } else if (token_prefix(result.token, "frame.")) {
+            struct view *view = space_manager_find_view(&g_space_manager, space_manager_active_space());
+            struct token frame_token = result.token;
+            frame_token.text += 6;
+            frame_token.length -= 6;
+            struct window_node *node = parse_frame_selector(rsp, view, frame_token);
+            if (node) {
+                result.window = window_manager_find_window(&g_window_manager, node->window_order[0]);
+                if (!result.window) daemon_fail(rsp, "the selected frame is empty.\n");
             }
         } else if (token_prefix(result.token, ARGUMENT_COMMON_SEL_STACK_PREFIX)) {
             if (acting_window) {
@@ -1506,6 +1572,13 @@ static void handle_domain_config(FILE *rsp, struct token domain, char *message)
                     } else {
                         daemon_fail(rsp, "cannot set layout for a macOS fullscreen space!\n");
                     }
+                } else if (token_equals(value, ARGUMENT_CONFIG_LAYOUT_RATPOISON)) {
+                    if (space_is_user(sel_sid)) {
+                        view_set_flag(view, VIEW_LAYOUT);
+                        space_manager_set_layout_for_space(&g_space_manager, sel_sid, VIEW_RATPOISON);
+                    } else {
+                        daemon_fail(rsp, "cannot set layout for a macOS fullscreen space!\n");
+                    }
                 } else if (token_equals(value, ARGUMENT_CONFIG_LAYOUT_STACK)) {
                     if (space_is_user(sel_sid)) {
                         view_set_flag(view, VIEW_LAYOUT);
@@ -1533,6 +1606,8 @@ static void handle_domain_config(FILE *rsp, struct token domain, char *message)
                     space_manager_set_layout_for_all_spaces(&g_space_manager, VIEW_BSP);
                 } else if (token_equals(value, ARGUMENT_CONFIG_LAYOUT_STACK)) {
                     space_manager_set_layout_for_all_spaces(&g_space_manager, VIEW_STACK);
+                } else if (token_equals(value, ARGUMENT_CONFIG_LAYOUT_RATPOISON)) {
+                    space_manager_set_layout_for_all_spaces(&g_space_manager, VIEW_RATPOISON);
                 } else if (token_equals(value, ARGUMENT_CONFIG_LAYOUT_FLOAT)) {
                     space_manager_set_layout_for_all_spaces(&g_space_manager, VIEW_FLOAT);
                 } else {
@@ -2004,11 +2079,53 @@ static void handle_domain_space(FILE *rsp, struct token domain, char *message)
             } else {
                 daemon_fail(rsp, "unknown value '%.*s' given to command '%.*s' for domain '%.*s'\n", value.length, value.text, command.length, command.text, domain.length, domain.text);
             }
+        } else if (token_equals(command, COMMAND_SPACE_SPLIT) ||
+                   token_equals(command, COMMAND_SPACE_FOCUS_FRAME) ||
+                   token_equals(command, COMMAND_SPACE_REMOVE_FRAME) ||
+                   token_equals(command, COMMAND_SPACE_ONLY_FRAME)) {
+            struct view *view = space_manager_find_view(&g_space_manager, acting_sid);
+            if (view->layout != VIEW_RATPOISON) {
+                daemon_fail(rsp, "frame commands require the ratpoison layout.\n");
+                return;
+            }
+            if (token_equals(command, COMMAND_SPACE_FOCUS_FRAME)) {
+                if (acting_sid != space_manager_active_space()) {
+                    daemon_fail(rsp, "focus the space before selecting a frame.\n");
+                    return;
+                }
+                struct window_node *node = parse_frame_selector(rsp, view, get_token(&message));
+                if (!node) return;
+                focus_ratpoison_frame(view, node);
+            } else {
+                bool success;
+                if (token_equals(command, COMMAND_SPACE_SPLIT)) {
+                    struct token value = get_token(&message);
+                    enum window_node_split split = token_equals(value, "vertical") ? SPLIT_Y
+                                                 : token_equals(value, "horizontal") ? SPLIT_X : SPLIT_NONE;
+                    success = view_ratpoison_split(view, split);
+                } else if (token_equals(command, COMMAND_SPACE_REMOVE_FRAME)) {
+                    success = view_ratpoison_remove_frame(view);
+                } else {
+                    success = view_ratpoison_only_frame(view);
+                }
+                if (!success) {
+                    daemon_fail(rsp, "cannot change frames: invalid split, insufficient space, last frame, or stack capacity exceeded.\n");
+                    return;
+                }
+                view_flush(view);
+                if (acting_sid == space_manager_active_space()) focus_ratpoison_frame(view, view_ratpoison_selected_frame(view));
+            }
         } else if (token_equals(command, COMMAND_SPACE_LAYOUT)) {
             struct token value = get_token(&message);
             if (token_equals(value, ARGUMENT_SPACE_LAYOUT_BSP)) {
                 if (space_is_user(acting_sid)) {
                     space_manager_set_layout_for_space(&g_space_manager, acting_sid, VIEW_BSP);
+                } else {
+                    daemon_fail(rsp, "cannot set layout for a macOS fullscreen space!\n");
+                }
+            } else if (token_equals(value, ARGUMENT_CONFIG_LAYOUT_RATPOISON)) {
+                if (space_is_user(acting_sid)) {
+                    space_manager_set_layout_for_space(&g_space_manager, acting_sid, VIEW_RATPOISON);
                 } else {
                     daemon_fail(rsp, "cannot set layout for a macOS fullscreen space!\n");
                 }
@@ -2082,10 +2199,26 @@ static void handle_domain_window(FILE *rsp, struct token domain, char *message)
             }
 
             if (acting_window) {
+                struct view *view = window_manager_find_managed_window(&g_window_manager, acting_window);
+                if (view) view_ratpoison_select_window(view, acting_window->id, true);
                 window_manager_focus_window_with_raise(&acting_window->application->psn, acting_window->id, acting_window->ref);
             } else {
                 daemon_fail(rsp, "could not locate the window to act on!\n");
             }
+        } else if (token_equals(command, COMMAND_WINDOW_FRAME)) {
+            struct view *view = window_manager_find_managed_window(&g_window_manager, acting_window);
+            if (!view || view->layout != VIEW_RATPOISON) {
+                daemon_fail(rsp, "moving to a frame requires a window managed by the ratpoison layout.\n");
+                return;
+            }
+            struct window_node *target = parse_frame_selector(rsp, view, get_token(&message));
+            if (!target) return;
+            if (!view_ratpoison_move_window(view, acting_window, target)) {
+                daemon_fail(rsp, "cannot move window to frame: stack capacity exceeded.\n");
+                return;
+            }
+            view_flush(view);
+            if (view->sid == space_manager_active_space()) focus_ratpoison_frame(view, target);
         } else if (token_equals(command, COMMAND_WINDOW_CLOSE)) {
             struct selector selector = parse_window_selector(rsp, &message, acting_window, true);
 

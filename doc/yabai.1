@@ -140,9 +140,11 @@ DIR_SEL\&     := north | east | south | west
 
 STACK_SEL\&   := stack.prev | stack.next | stack.first | stack.last | stack.recent | stack.<index (1\-based)>
 
-WINDOW_SEL\&  := prev | next | first | last | recent | mouse | largest | smallest | sibling | first_nephew | second_nephew | uncle | first_cousin | second_cousin | STACK_SEL | DIR_SEL | <window id>
+WINDOW_SEL\&  := prev | next | first | last | recent | mouse | largest | smallest | sibling | first_nephew | second_nephew | uncle | first_cousin | second_cousin | STACK_SEL | frame.FRAME_SEL | DIR_SEL | <window id>
 
 DISPLAY_SEL := prev | next | first | last | recent | mouse | DIR_SEL | <arrangement index (1\-based)> | LABEL
+
+FRAME_SEL := prev | next | first | last | DIR_SEL | <frame id (0\-based)>
 
 SPACE_SEL\&   := prev | next | first | last | recent | mouse | <mission\-control index (1\-based)> | LABEL
 
@@ -340,7 +342,7 @@ Action performed when a bsp\-managed window is dropped in the center of some oth
 .RE
 .SS "Space Settings"
 .sp
-\fBlayout\fP [\fIbsp|stack|float\fP]
+\fBlayout\fP [\fIbsp|stack|float|ratpoison\fP]
 .RS 4
 Set the layout of the selected space.
 .RE
@@ -519,7 +521,27 @@ Size of the gap that separates windows on the selected space.
 Toggle space setting on or off for the selected space.
 .RE
 .sp
-\fB\-\-layout\fP \fIbsp|stack|float\fP
+\fB\-\-split\fP \fIvertical|horizontal\fP
+.RS 4
+Ratpoison only: split the selected frame immediately. Windows and the original id stay in the left/top child; the right/bottom child starts empty with a new id. Uses split_ratio and window_gap.
+.RE
+.sp
+\fB\-\-focus\-frame\fP \fI<FRAME_SEL>\fP
+.RS 4
+Ratpoison only: select a frame, raising its active window if occupied. Empty frames become the destination for new windows without changing macOS keyboard focus. The space must be active. Next/prev wrap, including empty frames. North/east/south/west select the nearest frame geometrically, including empty frames, and stop at edges.
+.RE
+.sp
+\fB\-\-remove\-frame\fP
+.RS 4
+Ratpoison only: move the selected frame\(cqs windows to the first frame of its sibling subtree and expand the sibling. The last frame cannot be removed.
+.RE
+.sp
+\fB\-\-only\-frame\fP
+.RS 4
+Ratpoison only: collect all windows into the selected frame, retaining its id. Each frame supports up to 32 windows. Remove/only/move operations fail atomically if capacity would be exceeded. New windows arriving at a full frame remain unmanaged until a later reconciliation or layout change can admit them.
+.RE
+.sp
+\fB\-\-layout\fP \fIbsp|stack|float|ratpoison\fP
 .RS 4
 Set the layout of the selected space.
 .RE
@@ -535,6 +557,11 @@ If the command is called without an argument it will try to remove a previously 
 .sp
 yabai \-m window [\fI<WINDOW_SEL>\fP] \fI<COMMAND>\fP
 .SS "COMMAND"
+.sp
+\fB\-\-frame\fP \fI<FRAME_SEL>\fP
+.RS 4
+Move the selected managed window to a frame on its ratpoison space, preserving its source frame even when empty. Select the destination frame. The window selector frame.FRAME_SEL selects the active window of an occupied frame.
+.RE
 .sp
 \fB\-\-focus\fP [\fI<WINDOW_SEL>\fP]
 .RS 4
@@ -1317,3 +1344,10 @@ If \fByabai\fP can\(cqt handle a message, it will return a non\-zero exit code.
 .SH "AUTHOR"
 .sp
 Åsmund Vikane <aasvi93 at gmail.com>
+.SH "RATPOISON MODE"
+.sp
+Ratpoison starts with one frame. New windows stack in the selected frame and closing windows preserves empty frames. Frame ids remain stable until removed or the layout is reset. Automatic balancing is ignored for additions and removals. Frame trees are not saved across daemon restarts.
+.sp
+The frames property of a space query lists frame id, selected, geometry (x, y, w, h), windows in stack order, and active-window (0 when empty). Other layouts return an empty array.
+.sp
+See examples/phoenix-ratpoison.js for Super-S (Command-S) prefix handling and bin/yabai-prefix for the native opaque-black menu using GoMono Nerd Font Mono at 12 points. The menu lists windows and empty frames in compact, paged columns. Arrows or h/j/k/l select neighbouring frames, including empty ones. Keys 1, 2, and 3 select ratpoison, floating, and BSP. Shift-T toggles ratpoison with floating as the exit mode. Escape closes the menu without changing layout. Navigation and splits keep the menu open; eight idle seconds close it. See doc/ratpoison.md for the complete bindings and setup.

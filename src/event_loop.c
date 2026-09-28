@@ -50,6 +50,7 @@ static void window_did_receive_focus(struct window_manager *wm, struct mouse_sta
         wm->last_window_id = wm->focused_window_id;
     }
 
+    bool focus_changed = wm->focused_window_id != window->id;
     wm->focused_window_id = window->id;
     wm->focused_window_psn = window->application->psn;
     ms->ffm_window_id = 0;
@@ -58,6 +59,7 @@ static void window_did_receive_focus(struct window_manager *wm, struct mouse_sta
     if (!view) return;
 
     struct window_node *node = view_find_window_node(view, window->id);
+    view_ratpoison_select_window(view, window->id, focus_changed);
     if (node->window_count <= 1) return;
 
     for (int i = 0; i < node->window_count; ++i) {
@@ -208,8 +210,8 @@ static EVENT_HANDLER(APPLICATION_LAUNCHED)
                 // This is necessary to make sure that we do not call the AX API for each modification to the tree.
                 //
 
+                if (!view_add_window_node_with_insertion_point(view, window, prev_window_id)) continue;
                 window_manager_adjust_layer(window, LAYER_BELOW);
-                view_add_window_node_with_insertion_point(view, window, prev_window_id);
                 window_manager_add_managed_window(&g_window_manager, window, view);
 
                 view_set_flag(view, VIEW_IS_DIRTY);
@@ -455,8 +457,8 @@ static EVENT_HANDLER(APPLICATION_VISIBLE)
             // This is necessary to make sure that we do not call the AX API for each modification to the tree.
             //
 
+            if (!view_add_window_node_with_insertion_point(view, window, prev_window_id)) continue;
             window_manager_adjust_layer(window, LAYER_BELOW);
-            view_add_window_node_with_insertion_point(view, window, prev_window_id);
             window_manager_add_managed_window(&g_window_manager, window, view);
 
             view_set_flag(view, VIEW_IS_DIRTY);
@@ -1124,6 +1126,9 @@ static EVENT_HANDLER(MOUSE_DOWN)
 
     struct window *window = window_manager_find_window_at_point(&g_window_manager, point);
     if (!window || window_check_flag(window, WINDOW_FULLSCREEN)) goto out;
+
+    struct view *view = window_manager_find_managed_window(&g_window_manager, window);
+    if (view) view_ratpoison_select_window(view, window->id, true);
 
     g_mouse_state.window = window;
     g_mouse_state.window_frame = g_mouse_state.window->frame;

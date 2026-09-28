@@ -16,7 +16,8 @@
     SPACE_PROPERTY_ENTRY("last-window",          SPACE_PROPERTY_LAST_WINDOW,   0x100) \
     SPACE_PROPERTY_ENTRY("has-focus",            SPACE_PROPERTY_HAS_FOCUS,     0x200) \
     SPACE_PROPERTY_ENTRY("is-visible",           SPACE_PROPERTY_IS_VISIBLE,    0x400) \
-    SPACE_PROPERTY_ENTRY("is-native-fullscreen", SPACE_PROPERTY_IS_FULLSCREEN, 0x800)
+    SPACE_PROPERTY_ENTRY("is-native-fullscreen", SPACE_PROPERTY_IS_FULLSCREEN, 0x800) \
+    SPACE_PROPERTY_ENTRY("frames",               SPACE_PROPERTY_FRAMES,        0x1000)
 
 enum space_property
 {
@@ -159,6 +160,7 @@ struct window_node
     uint32_t window_list[NODE_MAX_WINDOW_COUNT];
     uint32_t window_order[NODE_MAX_WINDOW_COUNT];
     int window_count;
+    unsigned frame_id;
     float ratio;
     enum window_node_split split;
     enum window_node_child child;
@@ -171,7 +173,8 @@ enum view_type
     VIEW_DEFAULT,
     VIEW_BSP,
     VIEW_STACK,
-    VIEW_FLOAT
+    VIEW_FLOAT,
+    VIEW_RATPOISON
 };
 
 static const char *view_type_str[] =
@@ -179,7 +182,8 @@ static const char *view_type_str[] =
     "default",
     "bsp",
     "stack",
-    "float"
+    "float",
+    "ratpoison"
 };
 
 enum view_flag
@@ -204,6 +208,8 @@ struct view
     uint64_t sid;
     struct window_node *root;
     uint32_t insertion_point;
+    struct window_node *selected_frame;
+    unsigned next_frame_id;
     enum view_type layout;
     enum window_node_split split_type;
     int top_padding;
@@ -240,6 +246,15 @@ struct window_node *view_add_window_node_with_insertion_point(struct view *view,
 struct window_node *view_add_window_node(struct view *view, struct window *window);
 struct window_node *view_remove_window_node(struct view *view, struct window *window);
 uint32_t *view_find_window_list(struct view *view, int *window_count);
+
+struct window_node *view_ratpoison_selected_frame(struct view *view);
+struct window_node *view_ratpoison_find_frame(struct view *view, unsigned frame_id);
+struct window_node *view_ratpoison_frame_in_direction(struct view *view, int direction);
+void view_ratpoison_select_window(struct view *view, uint32_t window_id, bool focus_changed);
+bool view_ratpoison_split(struct view *view, enum window_node_split split);
+bool view_ratpoison_remove_frame(struct view *view);
+bool view_ratpoison_only_frame(struct view *view);
+bool view_ratpoison_move_window(struct view *view, struct window *window, struct window_node *target);
 
 void view_serialize(FILE *rsp, struct view *view, uint64_t flags);
 bool view_is_invalid(struct view *view);

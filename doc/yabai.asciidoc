@@ -101,9 +101,11 @@ DIR_SEL     := north | east | south | west
 
 STACK_SEL   := stack.prev | stack.next | stack.first | stack.last | stack.recent | stack.<index (1-based)>
 
-WINDOW_SEL  := prev | next | first | last | recent | mouse | largest | smallest | sibling | first_nephew | second_nephew | uncle | first_cousin | second_cousin | STACK_SEL | DIR_SEL | <window id>
+WINDOW_SEL  := prev | next | first | last | recent | mouse | largest | smallest | sibling | first_nephew | second_nephew | uncle | first_cousin | second_cousin | STACK_SEL | frame.FRAME_SEL | DIR_SEL | <window id>
 
 DISPLAY_SEL := prev | next | first | last | recent | mouse | DIR_SEL | <arrangement index (1-based)> | LABEL
+
+FRAME_SEL   := prev | next | first | last | DIR_SEL | <frame id (0-based)>
 
 SPACE_SEL   := prev | next | first | last | recent | mouse | <mission-control index (1-based)> | LABEL
 
@@ -232,7 +234,7 @@ Global Settings
 Space Settings
 ^^^^^^^^^^^^^^
 
-*layout* ['bsp|stack|float']::
+*layout* ['bsp|stack|float|ratpoison']::
     Set the layout of the selected space.
 
 *split_type* ['vertical|horizontal|auto']::
@@ -351,8 +353,21 @@ COMMAND
 *--toggle* 'padding|gap|mission-control|show-desktop'::
     Toggle space setting on or off for the selected space.
 
-*--layout* 'bsp|stack|float'::
-    Set the layout of the selected space.
+*--layout* 'bsp|stack|float|ratpoison'::
+    Set the layout of the selected space. Ratpoison starts with one frame; new windows stack in the selected frame and closing windows preserves empty frames. Frame ids remain stable until removed or the layout is reset. Automatic balancing is ignored for window additions and removals. Frames are kept in memory, not saved across daemon restarts.
+
+*--split* 'vertical|horizontal'::
+    Ratpoison only: split the selected frame immediately, retaining its windows and id in the left/top child. The right/bottom child starts empty with a new id. Uses split_ratio and window_gap. Selection stays in the original frame.
+
+*--focus-frame* '<FRAME_SEL>'::
+    Ratpoison only: select a frame and raise its active window if occupied. Empty frames become the destination for new windows without changing macOS keyboard focus. The space must be active. Next/prev wrap around the tree, including empty frames. North/east/south/west select the nearest frame geometrically, including empty frames, and stop at edges.
+
+*--remove-frame*::
+    Ratpoison only: remove the selected frame and move its windows to the first frame in its sibling subtree. The sibling expands into the removed frame's area. The last frame cannot be removed.
+
+*--only-frame*::
+    Ratpoison only: collapse all frames into the selected frame, retaining all windows and its id. Each frame supports up to 32 windows. Remove/only/move operations fail without changes if they would exceed that limit. New windows arriving at a full frame remain unmanaged until admitted by a later reconciliation or layout change.
+
 
 *--label* ['<LABEL>']::
     Label the selected space, allowing that label to be used as an alias in commands that take a `SPACE_SEL` parameter. +
@@ -368,6 +383,9 @@ yabai -m window ['<WINDOW_SEL>'] '<COMMAND>'
 
 COMMAND
 ^^^^^^^
+
+*--frame* '<FRAME_SEL>'::
+    Move the selected managed window to a frame on its ratpoison space, preserving the source frame even when empty. Select the destination frame. Use `--focus frame.FRAME_SEL` to focus a frame's active window without moving it; this selector fails for empty frames.
 
 *--focus* ['<WINDOW_SEL>']::
     Focus the given window. +
@@ -908,3 +926,9 @@ Author
 ------
 
 Åsmund Vikane <aasvi93 at gmail.com>
+
+== RATPOISON MODE
+
+See examples/phoenix-ratpoison.js for Super-S (Command-S) prefix handling and bin/yabai-prefix for the native opaque-black menu using GoMono Nerd Font Mono at 12 points. The menu lists windows and empty frames in compact, paged columns. Arrows or h/j/k/l select neighbouring frames, including empty ones. Keys 1, 2, and 3 select ratpoison, floating, and BSP. Shift-T toggles ratpoison with floating as the exit mode. Escape closes the menu without changing layout. Navigation and splits keep the menu open; eight idle seconds close it. See doc/ratpoison.md for the complete bindings and setup.
+
+`query --spaces` includes a `frames` property (an empty array for other layouts). Each entry contains the stable frame `id`, `selected`, geometry (`x`, `y`, `w`, `h`), `windows` in stack order, and `active-window` (0 when empty). Query just this property with `query --spaces frames --space`.

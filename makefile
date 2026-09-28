@@ -12,7 +12,7 @@ OSAX_SRC       = ./src/osax/payload_bin.c ./src/osax/loader_bin.c
 YABAI_SRC      = ./src/manifest.m $(OSAX_SRC)
 OSAX_PATH      = ./src/osax
 INFO_PLIST     = $(ASSET_PATH)/Info.plist
-BINS           = $(BUILD_PATH)/yabai
+BINS           = $(BUILD_PATH)/yabai $(BUILD_PATH)/yabai-prefix
 
 .PHONY: all asan tsan install man icon archive publish sign clean-build clean
 
@@ -66,3 +66,7 @@ clean: clean-build
 $(BUILD_PATH)/yabai: $(YABAI_SRC)
 	mkdir -p $(BUILD_PATH)
 	xcrun clang $^ $(BUILD_FLAGS) $(CLI_FLAGS) $(FRAMEWORK_PATH) $(FRAMEWORK) -o $@
+
+$(BUILD_PATH)/yabai-prefix: ./src/prefix_menu.m
+	mkdir -p $(BUILD_PATH)
+	xcrun clang $< -std=c11 -Wall -Wextra -Wno-unused-parameter -O2 -fobjc-arc -mmacosx-version-min=11.0 -arch x86_64 -arch arm64 -framework Cocoa -o $@

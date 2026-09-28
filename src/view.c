@@ -592,7 +592,7 @@ struct window_node *view_find_window_node_in_direction(struct view *view, struct
     CGPoint source_area_max = area_max_point(source->area);
 
     for (struct window_node *target = window_node_find_first_leaf(view->root); target; target = window_node_find_next_leaf(target)) {
-        if (source == target) continue;
+        if (source == target || !target->window_count) continue;
 
         CGPoint target_area_max = area_max_point(target->area);
         if (area_is_in_direction(&source->area, source_area_max, &target->area, target_area_max, direction)) {
@@ -623,7 +623,7 @@ struct window_node *view_remove_window_node(struct view *view, struct window *wi
     struct window_node *node = view_find_window_node(view, window->id);
     if (!node) return NULL;
 
-    if (node->window_count > 1) {
+    if (node->window_count > 1 || view->layout == VIEW_RATPOISON) {
         bool removed_entry = false;
         bool removed_order = false;
 
@@ -642,6 +642,8 @@ struct window_node *view_remove_window_node(struct view *view, struct window *wi
         assert(removed_entry);
         assert(removed_order);
         --node->window_count;
+        node->window_list[node->window_count] = 0;
+        node->window_order[node->window_count] = 0;
 
         if (view->insertion_point == window->id) {
             view->insertion_point = node->window_order[0];
@@ -750,8 +752,13 @@ void view_stack_window_node(struct window_node *node, struct window *window)
 
 struct window_node *view_add_window_node_with_insertion_point(struct view *view, struct window *window, uint32_t insertion_point)
 {
-    if (!window_node_is_occupied(view->root) &&
-        window_node_is_leaf(view->root)) {
+    if (view->layout == VIEW_RATPOISON) {
+        struct window_node *node = view_ratpoison_selected_frame(view);
+        if (node->window_count == NODE_MAX_WINDOW_COUNT) return NULL;
+        view_stack_window_node(node, window);
+        return node;
+    } else if (!window_node_is_occupied(view->root) &&
+               window_node_is_leaf(view->root)) {
         view->root->window_list[0] = window->id;
         view->root->window_order[0] = window->id;
         view->root->window_count = 1;
@@ -824,7 +831,7 @@ uint32_t *view_find_window_list(struct view *view, int *window_count)
     uint32_t *window_list = ts_alloc_list(uint32_t, capacity);
 
     for (struct window_node *node = window_node_find_first_leaf(view->root); node; node = window_node_find_next_leaf(node)) {
-        if (*window_count + node->window_count >= capacity) {
+        while (*window_count + node->window_count >= capacity) {
             ts_expand(window_list, sizeof(uint32_t) * capacity, sizeof(uint32_t) * capacity);
             capacity *= 2;
         }
@@ -930,6 +937,7 @@ void view_serialize(FILE *rsp, struct view *view, uint64_t flags)
         if (did_output) fprintf(rsp, ",\n");
 
         struct window_node *first_leaf = window_node_find_first_leaf(view->root);
+        while (first_leaf && !first_leaf->window_count) first_leaf = window_node_find_next_leaf(first_leaf);
         fprintf(rsp, "\t\"first-window\":%d", first_leaf ? first_leaf->window_order[0] : 0);
         did_output = true;
     }
@@ -938,6 +946,7 @@ void view_serialize(FILE *rsp, struct view *view, uint64_t flags)
         if (did_output) fprintf(rsp, ",\n");
 
         struct window_node *last_leaf = window_node_find_last_leaf(view->root);
+        while (last_leaf && !last_leaf->window_count) last_leaf = window_node_find_prev_leaf(last_leaf);
         fprintf(rsp, "\t\"last-window\":%d", last_leaf ? last_leaf->window_order[0] : 0);
         did_output = true;
     }
@@ -960,6 +969,27 @@ void view_serialize(FILE *rsp, struct view *view, uint64_t flags)
         if (did_output) fprintf(rsp, ",\n");
 
         fprintf(rsp, "\t\"is-native-fullscreen\":%s", json_bool(space_is_fullscreen(view->sid)));
+        did_output = true;
+    }
+
+    if (flags & SPACE_PROPERTY_FRAMES) {
+        if (did_output) fprintf(rsp, ",\n");
+        fprintf(rsp, "\t\"frames\":[");
+        if (view->layout == VIEW_RATPOISON) {
+            struct window_node *selected = view_ratpoison_selected_frame(view);
+            bool first = true;
+            for (struct window_node *node = window_node_find_first_leaf(view->root); node; node = window_node_find_next_leaf(node)) {
+                if (!first) fprintf(rsp, ",");
+                first = false;
+                fprintf(rsp, "{\"id\":%u,\"selected\":%s,\"x\":%.4f,\"y\":%.4f,\"w\":%.4f,\"h\":%.4f,\"windows\":[",
+                        node->frame_id, json_bool(node == selected), node->area.x, node->area.y, node->area.w, node->area.h);
+                for (int i = 0; i < node->window_count; ++i) {
+                    fprintf(rsp, "%s%u", i ? "," : "", node->window_list[i]);
+                }
+                fprintf(rsp, "],\"active-window\":%u}", node->window_order[0]);
+            }
+        }
+        fprintf(rsp, "]");
     }
 
     fprintf(rsp, "\n}");
@@ -991,6 +1021,7 @@ struct view *view_create(uint64_t sid)
     view->root = malloc(sizeof(struct window_node));
     memset(view->root, 0, sizeof(struct window_node));
 
+    view->next_frame_id = 1;
     view->sid = sid;
     view->uuid = SLSSpaceCopyName(g_connection, sid);
 
@@ -1016,6 +1047,8 @@ struct view *view_create(uint64_t sid)
 
 void view_clear(struct view *view)
 {
+    view->selected_frame = NULL;
+    view->next_frame_id = 1;
     if (view->root) {
         if (view->root->left)  window_node_destroy(view->root->left);
         if (view->root->right) window_node_destroy(view->root->right);

@@ -94,3 +94,7 @@ You acknowledge that you understand the potential risk that may come from disabl
 
 <!-- External links -->
 [external-about-sip]: https://support.apple.com/en-us/HT204899
+
+### Manual tiling
+
+The `ratpoison` layout adds persistent, manually split frames. See the [ratpoison guide](doc/ratpoison.md) for commands and a Phoenix Super-S prefix module with letter/number window selection.

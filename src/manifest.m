@@ -87,6 +87,7 @@
 #include "display.c"
 #include "space.c"
 #include "view.c"
+#include "ratpoison.c"
 #include "window.c"
 #include "process_manager.c"
 #include "application.c"

@@ -293,6 +293,7 @@ void window_manager_remove_managed_window(struct window_manager *wm, uint32_t wi
 void window_manager_add_managed_window(struct window_manager *wm, struct window *window, struct view *view)
 {
     if (view->layout == VIEW_FLOAT) return;
+    if (view->layout == VIEW_RATPOISON && !view_find_window_node(view, window->id)) return;
     table_add(&wm->managed_window, &window->id, view);
     window_manager_purify_window(wm, window);
 }
@@ -1005,6 +1006,7 @@ struct window *window_manager_find_prev_managed_window(struct space_manager *sm,
     if (!node) return NULL;
 
     struct window_node *prev = window_node_find_prev_leaf(node);
+    while (prev && !prev->window_count) prev = window_node_find_prev_leaf(prev);
     if (!prev) return NULL;
 
     return window_manager_find_window(wm, prev->window_order[0]);
@@ -1019,6 +1021,7 @@ struct window *window_manager_find_next_managed_window(struct space_manager *sm,
     if (!node) return NULL;
 
     struct window_node *next = window_node_find_next_leaf(node);
+    while (next && !next->window_count) next = window_node_find_next_leaf(next);
     if (!next) return NULL;
 
     return window_manager_find_window(wm, next->window_order[0]);
@@ -1030,6 +1033,7 @@ struct window *window_manager_find_first_managed_window(struct space_manager *sm
     if (!view) return NULL;
 
     struct window_node *first = window_node_find_first_leaf(view->root);
+    while (first && !first->window_count) first = window_node_find_next_leaf(first);
     if (!first) return NULL;
 
     return window_manager_find_window(wm, first->window_order[0]);
@@ -1041,6 +1045,7 @@ struct window *window_manager_find_last_managed_window(struct space_manager *sm,
     if (!view) return NULL;
 
     struct window_node *last = window_node_find_last_leaf(view->root);
+    while (last && !last->window_count) last = window_node_find_prev_leaf(last);
     if (!last) return NULL;
 
     return window_manager_find_window(wm, last->window_order[0]);
@@ -2614,7 +2619,7 @@ static void window_manager_check_for_windows_on_space(struct window_manager *wm,
             // This is necessary to make sure that we do not call the AX API for each modification to the tree.
             //
 
-            view_add_window_node(view, window);
+            if (!view_add_window_node(view, window)) continue;
             window_manager_adjust_layer(window, LAYER_BELOW);
             window_manager_add_managed_window(wm, window, view);
             view_set_flag(view, VIEW_IS_DIRTY);
