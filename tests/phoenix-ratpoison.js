@@ -67,7 +67,10 @@ const remote = { id: 103, index: 3, display: 2, type: 'float', 'is-visible': tru
 const desktop = { id: 104, index: 4, display: 2, type: 'bsp', 'is-visible': false };
 const fullscreen = { id: 105, index: 5, display: 2, type: 'float', 'is-visible': false, 'is-native-fullscreen': true };
 const desktops = [space, remote, desktop, fullscreen];
-function refresh(currentSpace = space, currentWindows = windows) { reply(currentSpace); reply(currentWindows); }
+function refresh(currentSpace = space, currentWindows = windows) {
+    reply(currentSpace); reply(currentWindows);
+    if (tasks[0] && tasks[0].args.join(' ') === '-m query --spaces') reply([currentSpace]);
+}
 function open(currentSpace = space, currentWindows = windows) { press('s', ['cmd']); refresh(currentSpace, currentWindows); }
 idle();
 open();
@@ -222,6 +225,48 @@ for (let attempt = 0; attempt < 30; ++attempt) {
 assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 open({ ...space, type: 'float' }, []); press('m', ['shift']); refresh({ ...space, type: 'float' }, []);
 assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
+// The main chooser and Shift-F see only currently visible Spaces, across layouts.
+const single = { ...space, frames: [{ id: 0, selected: true, windows: [10], 'active-window': 10 }] };
+const remoteFrames = { ...remote, type: 'ratpoison', frames: [
+    { id: 0, selected: false, windows: [30, 40], 'active-window': 30 },
+    { id: 7, selected: true, windows: [], 'active-window': 0 }
+] };
+const remoteWindows = [{ id: 30, app: 'Browser', title: 'Remote' }, { id: 40, app: 'Editor', title: 'Covered' }];
+function visibleMenu(other = remoteFrames, otherWindows = remoteWindows, mode) {
+    if (mode) { open(single, [windows[0]]); press(mode, ['shift']); }
+    else press('s', ['cmd']);
+    reply(single); reply([windows[0]]);
+    expectCommand(['query', '--spaces']); reply([single, other, desktop]);
+    expectCommand(['query', '--windows', '--space', '3']); reply(otherWindows);
+    assert.equal(tasks.length, 0); // The hidden S4 was never queried.
+}
+visibleMenu();
+assert.ok(lastMenu.text.includes('S3 (2)   F7 [empty]'));
+assert.ok(!lastMenu.text.includes('S4 (2)'));
+press('5'); reply([single, remoteFrames]); reply(single);
+expectCommand(['space', '--focus', '3']); reply(null); reply(remoteFrames);
+expectCommand(['space', '3', '--focus-frame', '7']); reply(null); refresh(remoteFrames, remoteWindows);
+press('2'); expectCommand(['space', '3', '--layout', 'float']); reply(null); idle();
+// Covered remote windows are focused in their original frame, never moved.
+visibleMenu(); press('6'); reply([single, remoteFrames]); reply(single); reply(null); reply(remoteFrames);
+expectCommand(['query', '--windows', '--window', '40']); reply({ id: 40, space: 3 });
+expectCommand(['space', '3', '--focus-frame', '0']); reply(null);
+expectCommand(['window', '--focus', '40']); reply(null); refresh(remoteFrames, remoteWindows); press('escape'); idle();
+// Floating windows and empty containers are reachable from the same main menu.
+visibleMenu(remote, [remoteWindows[0]]); press('4'); reply([single, remote]); reply(single); reply(null); reply(remote);
+expectCommand(['query', '--windows', '--window', '30']); reply({ id: 30, space: 3 });
+expectCommand(['window', '--focus', '30']); reply(null); refresh(remote, [remoteWindows[0]]); press('escape'); idle();
+visibleMenu(remote, []); assert.ok(lastMenu.text.includes('S3 (2) [float, empty]'));
+press('4'); reply([single, remote]); reply(single); reply(null); reply(remote); refresh(remote, []);
+press('1'); expectCommand(['space', '3', '--layout', 'ratpoison']); reply(null); idle();
+visibleMenu(remoteFrames, remoteWindows, 'f'); press('5'); reply([single, remoteFrames]); reply(single); reply(null); reply(remoteFrames);
+expectCommand(['space', '3', '--focus-frame', '7']); reply(null); refresh(remoteFrames, remoteWindows); press('escape'); idle();
+// A Space that became hidden must not be activated from the visible-only list.
+visibleMenu(); press('5'); reply([single, { ...remoteFrames, 'is-visible': false }]);
+assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
+// Late remote queries cannot reopen a cancelled chooser.
+press('s', ['cmd']); reply(single); reply([windows[0]]); reply([single, remoteFrames]);
+press('escape'); reply(remoteWindows); idle();
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

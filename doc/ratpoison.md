@@ -79,7 +79,7 @@ Press **Super-S (Command-S)**, release it, then choose:
 | Arrows or `h/j/k/l` | Focus west/south/north/east, including empty frames |
 | `Shift-S` | Split horizontally (top/bottom) |
 | `Shift-V` | Split vertically (left/right) |
-| `Shift-F`, then a label | Select a frame, including empty frames |
+| `Shift-F`, then a label | Select a frame or container on any visible Space |
 | `Shift-M`, then a label | Move to a frame, display, or Space; follow cross-Space moves |
 | `Shift-D`, then a label | Focus a physical display's visible Space |
 | `Shift-U`, then a label | Focus a virtual desktop (Space) |
@@ -99,6 +99,20 @@ Floating-mode directional navigation chooses the nearest window centre in that
 direction; BSP uses yabai's existing managed-window navigation.
 
 ### Displays and virtual desktops
+
+The main `Super-S` chooser lists windows and frames on **all currently visible
+Spaces across physical displays**, with the active Space first. Every entry
+starts with `Sx (display number)`. Empty ratpoison frames are selectable directly;
+an empty floating/BSP Space appears as an empty container. Hidden virtual
+desktops remain available through `Shift-U`.
+
+Selecting a remote entry activates its Space, then focuses its window or selects
+its empty frame. The menu stays open on that destination so layout keys and frame
+commands apply there. Covered stack windows stay in their existing remote frame;
+local empty-frame recall behavior is unchanged. `Shift-F` lists frames and Space
+containers across the same visible Spaces, from any layout. Arrow/hjkl navigation
+continues to operate within the active Space. Use selection labels to cross displays.
+
 
 Display and Space containers are available in every layout. `Super-S`, then
 `Shift-M`, opens a destination list: local ratpoison frames first, followed by

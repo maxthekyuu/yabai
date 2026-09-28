@@ -170,6 +170,7 @@ var yabaiRatpoison = (function () {
         bind('m', ['shift'], function () { load('move'); });
         bind('d', ['shift'], function () { load('displays'); });
         bind('u', ['shift'], function () { load('spaces'); });
+        bind('f', ['shift'], function () { load('frames'); });
         if (space.type !== 'ratpoison') return;
         var args = ['space', String(space.index)];
         bind('s', ['shift'], function () { update(args.concat(['--split', 'horizontal'])); });
@@ -178,7 +179,6 @@ var yabaiRatpoison = (function () {
         bind('o', ['shift'], function () { update(args.concat(['--only-frame'])); });
         bind('tab', [], function () { update(args.concat(['--focus-frame', 'next'])); });
         bind('tab', ['shift'], function () { update(args.concat(['--focus-frame', 'prev'])); });
-        bind('f', ['shift'], function () { load('frames'); });
     }
 
     function clean(text) {
@@ -217,7 +217,7 @@ var yabaiRatpoison = (function () {
             lines.push(line);
         }
         if (!cells.length) lines.push('(no choices)');
-        lines.push('', 'arrows/hjkl focus   [ ] page   Esc close', 'Shift-M move   Shift-D displays   Shift-U Spaces');
+        lines.push('', 'arrows/hjkl focus   [ ] page   Shift-F containers   Esc close', 'Shift-M move   Shift-D displays   Shift-U Spaces');
         if (space.type === 'ratpoison') {
             lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next');
         }
@@ -314,10 +314,29 @@ var yabaiRatpoison = (function () {
                     return entry.display !== undefined ? item.display === entry.display && item['is-visible']
                                                        : item.id === entry.space.id;
                 })[0];
-                if (!target || target['is-native-fullscreen']) { error('destination is no longer available'); return; }
+                if (!target || (entry.visibleOnly && !target['is-visible']) ||
+                    (target['is-native-fullscreen'] && !entry.visibleOnly)) { error('destination is no longer available'); return; }
                 function focusWindow() {
                     if (source) request(['window', '--focus', String(source.id)], function () { load('windows'); });
-                    else load('windows');
+                    else if (entry.window !== undefined) {
+                        request(['query', '--windows', '--window', String(entry.window)], function (task) {
+                            var window;
+                            try { window = JSON.parse(task.output); } catch (_) {}
+                            if (!window || window.space !== target.index) { error('window is no longer in that container'); return; }
+                            function selectWindow() {
+                                request(['window', '--focus', String(entry.window)], function () { load('windows'); });
+                            }
+                            // Select its existing frame first: remote selection must
+                            // not recall a covered window into a different empty frame.
+                            var owner = target.type === 'ratpoison' && (target.frames || []).filter(function (frame) {
+                                return frame.windows.indexOf(entry.window) !== -1;
+                            })[0];
+                            if (owner) request(['space', String(target.index), '--focus-frame', String(owner.id)], selectWindow);
+                            else selectWindow();
+                        });
+                    } else if (entry.frame !== undefined) {
+                        request(['space', String(target.index), '--focus-frame', String(entry.frame)], function () { load('windows'); });
+                    } else load('windows');
                 }
                 function focusSpace() {
                     request(['query', '--spaces', '--space'], function (task) {
@@ -345,6 +364,91 @@ var yabaiRatpoison = (function () {
             if (!display) { error('display is no longer available'); return; }
             entry.display = display.index;
             resolveSpace();
+        });
+    }
+
+    function visibleChoices(mode, space, windows, current) {
+        run(['query', '--spaces'], function (task) {
+            if (!active || generation !== current) return;
+            var spaces;
+            try { spaces = JSON.parse(task.output); } catch (_) {}
+            if (task.status !== 0 || !Array.isArray(spaces)) { error('visible Space query failed'); return; }
+            var visible = spaces.filter(function (item) { return item.id !== space.id && item['is-visible']; })
+                .sort(function (a, b) { return a.index - b.index; });
+            visible.unshift(space);
+            var lists = {};
+            lists[space.id] = windows;
+            var pending = visible.length - 1;
+            function render() {
+                var entries = [], covered = [];
+                visible.forEach(function (item) {
+                    var local = item.id === space.id;
+                    var prefix = 'S' + item.index + ' (' + item.display + ') ';
+                    var byId = {};
+                    lists[item.id].forEach(function (window) { byId[window.id] = window; });
+                    function name(id) {
+                        var window = byId[id];
+                        return window ? clean(window.app + ': ' + window.title) : String(id);
+                    }
+                    function add(entry, background) {
+                        entry.space = item;
+                        entry.visibleOnly = true;
+                        entry.label = prefix + entry.label;
+                        (background ? covered : entries).push(entry);
+                    }
+                    if (item.type === 'ratpoison') {
+                        var frames = item.frames;
+                        frames.forEach(function (frame) {
+                            var label = (local && frame.selected ? '*' : ' ') + ' F' + frame.id;
+                            if (mode === 'frames' || !frame.windows.length) {
+                                add({ frame: frame.id, label: label + (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') });
+                            } else {
+                                var id = frame['active-window'] || frame.windows[0];
+                                add({ window: id, label: label + ' ' + name(id) });
+                            }
+                        });
+                        if (mode !== 'frames') frames.forEach(function (frame) {
+                            var front = frame['active-window'] || frame.windows[0];
+                            frame.windows.forEach(function (id) {
+                                if (id !== front) add({ window: id, label: '  F' + frame.id + ' ' + name(id) }, true);
+                            });
+                        });
+                        if (mode !== 'frames') {
+                            var managed = {};
+                            frames.forEach(function (frame) { frame.windows.forEach(function (id) { managed[id] = true; }); });
+                            lists[item.id].filter(function (window) {
+                                return !managed[window.id] && !window['is-minimized'] && !window['is-hidden'];
+                            }).forEach(function (window) { add({ window: window.id, label: '  ' + name(window.id) }); });
+                        }
+                    } else {
+                        var available = lists[item.id].filter(function (window) { return !window['is-minimized'] && !window['is-hidden']; });
+                        if (mode === 'frames' || !available.length) add({ label: '[' + item.type + (available.length ? ']' : ', empty]') });
+                        else available.sort(function (a, b) { return a.id - b.id; }).forEach(function (window) {
+                            add({ window: window.id, label: (window['has-focus'] ? '* ' : '  ') + name(window.id) });
+                        });
+                    }
+                });
+                choices(entries.concat(covered), mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
+                    if (entry.space.id !== space.id) { visit(entry, null); return; }
+                    if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
+                    else if (entry.window !== undefined) command(['window', '--focus', String(entry.window)]);
+                    else load('windows');
+                }, 0);
+            }
+            if (visible.some(function (item) { return item.type === 'ratpoison' && !Array.isArray(item.frames); })) {
+                error('visible Space query lacks frame support'); return;
+            }
+            if (!pending) { render(); return; }
+            visible.slice(1).forEach(function (item) {
+                run(['query', '--windows', '--space', String(item.index)], function (task) {
+                    if (!active || generation !== current) return;
+                    var result;
+                    try { result = JSON.parse(task.output); } catch (_) {}
+                    if (task.status !== 0 || !Array.isArray(result)) { error('visible window query failed'); return; }
+                    lists[item.id] = result;
+                    if (--pending === 0) render();
+                });
+            });
         });
     }
 
@@ -379,52 +483,7 @@ var yabaiRatpoison = (function () {
                     destinations(mode, space, windows, current);
                     return;
                 }
-                var byId = {};
-                windows.forEach(function (window) { byId[window.id] = window; });
-                function name(id) {
-                    var window = byId[id];
-                    return window ? clean(window.app + ': ' + window.title) : String(id);
-                }
-                var frames = space.frames || [];
-                if (mode === 'windows' || space.type !== 'ratpoison') {
-                    var entries = [];
-                    if (space.type === 'ratpoison') {
-                        frames.forEach(function (frame) {
-                            var mark = frame.selected ? '*' : ' ';
-                            if (!frame.windows.length) {
-                                entries.push({ frame: frame.id, label: mark + ' F' + frame.id + ' [empty]' });
-                            } else {
-                                var id = frame['active-window'] || frame.windows[0];
-                                entries.push({ id: id, label: mark + ' F' + frame.id + ' ' + name(id) });
-                            }
-                        });
-                        // Show one entry per frame first, including empties, so
-                        // a large stack cannot bury a newly created container.
-                        frames.forEach(function (frame) {
-                            var front = frame['active-window'] || frame.windows[0];
-                            frame.windows.forEach(function (id) {
-                                if (id !== front) entries.push({ id: id, label: '  F' + frame.id + ' ' + name(id) });
-                            });
-                        });
-                    } else {
-                        windows.filter(function (window) { return !window['is-minimized'] && !window['is-hidden']; })
-                            .sort(function (a, b) { return a.id - b.id; }).forEach(function (window) {
-                                entries.push({ id: window.id, label: (window['has-focus'] ? '* ' : '  ') + name(window.id) });
-                            });
-                    }
-                    choices(entries, 'windows / frames', space, windows, function (entry) {
-                        if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
-                        else command(['window', '--focus', String(entry.id)]);
-                    }, 0);
-                } else {
-                    choices(frames.map(function (frame) {
-                        return { id: frame.id, label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
-                            (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') };
-                    }), 'select frame', space, windows,
-                    function (entry) {
-                        update(['space', String(space.index), '--focus-frame', String(entry.id)]);
-                    }, 0);
-                }
+                visibleChoices(mode, space, windows, current);
             });
         });
     }
