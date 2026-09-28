@@ -87,7 +87,8 @@ Press **Super-S (Command-S)**, release it, then choose:
 | `Shift-R` | Remove selected frame |
 | `Shift-O` | Keep only selected frame, collecting its windows |
 | `Shift-T` | Toggle ratpoison; leaving it always chooses floating |
-| `[` / `]` | Previous / next page of choices |
+| `[` / `]`, Page Up / Page Down | Previous / next page of choices |
+| Space / Shift-Space | Next / previous page of choices |
 | Escape, Super-S again, click, or 8 idle seconds | Close the menu |
 
 Navigation, splitting, and empty-frame selection keep the menu open and refresh
@@ -111,7 +112,11 @@ menu removes all of them. Hidden Spaces have no on-screen label.
 The native menu and labels share one helper process. Labels are small,
 nonactivating, click-through panels with no animation or recurring polling.
 Window/frame positions reuse the menu's query results; whole-Space containers
-need one display-geometry query per refresh. At most one page of labels is drawn.
+need one display-geometry query per refresh. At most one page of labels is drawn. The dialog grows with its contents up to
+90% of the available screen height, with at most 29 distinct selection keys per
+page. A permanent page/count indicator shows how many choices and displays are
+on the current page. Page keys wrap and reuse the loaded choices without
+querying yabai again.
 
 Each display has a labeled box with its own terminal color. Pagination reserves room for each display before filling extra rows from a large
 group, so a display with many Spaces does not hide the other displays when they

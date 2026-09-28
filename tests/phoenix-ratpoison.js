@@ -127,16 +127,16 @@ renderers.delete(rendererId); rendererCallback({ status: 0 }); idle();
 const many = Array.from({ length: 80 }, (_, i) => ({ id: i + 1, app: 'App', title: 'Long\tTitle\n'.repeat(25) }));
 function manySpace() { return { ...space, frames: [{ id: 0, windows: many.map(w => w.id) }] }; }
 open(manySpace(), many);
-assert.ok(lastMenu.text.includes('1/4'));
-assert.ok(lastMenu.text.split('\n').length <= 22);
+assert.ok(lastMenu.text.includes('1/3'));
+assert.ok(lastMenu.text.split('\n').length * 18 + 28 <= screen.height * 0.9);
 assert.ok(!lastMenu.text.includes('\t'));
-press(']'); assert.ok(lastMenu.text.includes('Display 1 (continued)')); press('0'); expectCommand(['window', '--focus', '25']); reply(null); idle();
+press(']'); assert.ok(lastMenu.text.includes('Display 1 (continued)')); press('0'); expectCommand(['window', '--focus', '30']); reply(null); idle();
 screen = { x: -800, y: 200, width: 800, height: 500 };
 open(manySpace(), many);
-assert.ok(lastMenu.text.split('\n').length <= 22);
+assert.ok(lastMenu.text.split('\n').length * 18 + 28 <= screen.height * 0.9);
 assert.deepEqual(lastMenu.screen, screen);
 assert.ok(lastMenu.text.split('\n').every(line => line.length <= 70));
-press(']'); press('0'); expectCommand(['window', '--focus', '11']); reply(null); idle();
+press(']'); press('0'); expectCommand(['window', '--focus', '13']); reply(null); idle();
 // Display and Space containers are available in every layout. Move + follow
 // waits for WindowServer completion and keeps layout controls on the destination.
 screen = { x: 0, y: 0, width: 1400, height: 1000 };
@@ -303,8 +303,8 @@ open({ ...space, type: 'float' });
 assert.equal(lastMenu.badges[0].rect.x, windows[0].frame.x); press('escape'); idle();
 const withRects = many.map((w, i) => ({ ...w, frame: { x: i * 10, y: 0, w: 200, h: 100 } }));
 open({ ...space, type: 'float' }, withRects);
-assert.equal(lastMenu.badges.length, 24);
-press(']'); assert.equal(lastMenu.badges[0].key, '0'); assert.equal(lastMenu.badges[0].rect.x, 240);
+assert.equal(lastMenu.badges.length, 29);
+press(']'); assert.equal(lastMenu.badges[0].key, '0'); assert.equal(lastMenu.badges[0].rect.x, 290);
 assert.equal(renderers.size, 1); press('escape'); idle();
 fs.writeFileSync('/tmp/yabai-prefix-hint-menu.json', JSON.stringify(lastMenu));
 // Empty visible containers get a single display-bounds query; hidden Spaces
@@ -328,7 +328,7 @@ const allTargets = [...lotsOfSpaces, { ...remote, index: 15 }, thirdSpace];
 open(); press('m', ['shift']); refresh(); reply(threeDisplays); reply(allTargets);
 assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2, 3]);
 assert.ok(lastMenu.text.includes('S16 (3)'));
-assert.ok(lastMenu.text.split('\n').length <= 22);
+assert.ok(lastMenu.text.split('\n').length * 18 + 28 <= screen.height * 0.9);
 const seen = new Set();
 const pages = Number(lastMenu.text.split('\n')[0].match(/1\/(\d+)/)[1]);
 for (let page = 0; page < pages; ++page) {
@@ -341,6 +341,36 @@ press(lastMenu.badges.find(b => b.display === 3).key);
 resolveDestination(allTargets, threeDisplays);
 expectCommand(['window', '10', '--space', '16']);
 press('escape'); reply(null); idle();
+// All paging aliases update the same page, hints and count indicator, without
+// querying yabai again. Reverse paging wraps as well.
+open({ ...space, type: 'float' }, withRects);
+assert.ok(lastMenu.text.includes('Page 1/3 | 29/80 choices'));
+for (const [forward, reverse] of [['pageDown', 'pageUp'], ['space', 'space']]) {
+    press(forward); assert.ok(lastMenu.text.includes('Page 2/3')); assert.equal(lastMenu.badges[0].rect.x, 290);
+    press(reverse, reverse === 'space' ? ['shift'] : []);
+    assert.ok(lastMenu.text.includes('Page 1/3'));
+    assert.equal(tasks.length, 0);
+}
+press('pageUp'); assert.ok(lastMenu.text.includes('Page 3/3 | 22/80 choices'));
+press('escape'); idle();
+// Many physical displays paginate without exceeding the height/key budget.
+const screens40 = Array.from({length: 40}, (_, i) => ({id: 500+i, index: i+1}));
+const spaces40 = screens40.map(d => ({id: 1000+d.index, index: d.index, display: d.index, type: 'float', 'is-visible': true}));
+open(); press('d', ['shift']); refresh(); reply(screens40); reply(spaces40);
+fs.writeFileSync('/tmp/yabai-prefix-tall-menu.json', JSON.stringify(lastMenu));
+const screenPages = Number(lastMenu.text.split('\n')[0].match(/1\/(\d+)/)[1]);
+const visitedDisplays = new Set();
+for (let page = 0; page < screenPages; ++page) {
+    for (const group of lastMenu.groups) visitedDisplays.add(group.display);
+    assert.ok(lastMenu.text.split('\n').length * 18 + 28 <= screen.height * 0.9);
+    press('pageDown');
+}
+assert.equal(visitedDisplays.size, 40); press('escape'); idle();
+// Growing taller must still reserve selection keys for the other displays.
+const crowded = Array.from({length: 60}, (_, i) => ({id: 2000+i,index: i+1,display:1,type:'float','is-visible':i===0}));
+open(); press('m', ['shift']); refresh(); reply(threeDisplays); reply([...crowded, remote, thirdSpace]);
+assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1,2,3]);
+press('escape'); idle();
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

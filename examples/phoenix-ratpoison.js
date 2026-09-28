@@ -200,7 +200,11 @@ var yabaiRatpoison = (function () {
         controls(space, windows);
         var screen = Screen.main().visibleFrame();
         var columns = screen.width >= 1100 ? 2 : 1;
-        var rows = Math.max(1, Math.min(12, Math.floor((screen.height * 0.7 - 160) / 18)));
+        // Allow the panel to grow to 90% of the usable height. Reserve text
+        // rows for headings, controls and a permanent pagination status line.
+        var chromeRows = space.type === 'ratpoison' ? 9 : 7;
+        var lineBudget = Math.floor((Math.min(screen.height * 0.9, screen.height - 32) - 28) / 18);
+        var rows = Math.max(1, lineBudget - chromeRows - 2);
         var columnWidth = Math.max(12, Math.min(66, Math.floor((screen.width - 132) / (columns * 8)) - 3));
         var width = columns * (columnWidth + 3) + 1;
         var displays = {};
@@ -220,10 +224,11 @@ var yabaiRatpoison = (function () {
                 if (available < 3 || count === alphabet.length) return;
                 // Reserve a heading, one content row and a bottom border for
                 // other displays before filling this display's remaining rows.
-                var reserve = Math.min(remaining.length - index - 1, Math.floor(available / 3) - 1) * 3;
+                var otherGroups = Math.min(remaining.length - index - 1, Math.floor(available / 3) - 1, alphabet.length - count - 1);
+                var reserve = otherGroups * 3;
                 var capacity = (available - reserve - 2) * columns;
                 var offset = offsets[display], items = displays[display];
-                var take = Math.min(items.length - offset, capacity, alphabet.length - count);
+                var take = Math.min(items.length - offset, capacity, alphabet.length - count - otherGroups);
                 chunks.push({ display: Number(display), continued: offset > 0, entries: items.slice(offset, offset + take) });
                 used += Math.ceil(take / columns) + 2;
                 count += take; offsets[display] += take;
@@ -258,12 +263,20 @@ var yabaiRatpoison = (function () {
             groups.push({ start: start, end: lines.length - 1, display: group.display });
         });
         if (!hint) lines.push('(no choices)');
-        lines.push('', 'arrows/hjkl focus   [ ] page   Shift-F containers   Esc close', 'Shift-M move   Shift-D displays   Shift-U Spaces');
+        lines.push('Page ' + (page + 1) + '/' + pages.length + ' | ' + hint + '/' + entries.length +
+                   ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
+        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-D/U screens');
         if (space.type === 'ratpoison') {
             lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next');
         }
-        bind('[', [], function () { choices(entries, title, space, windows, choose, page - 1); });
-        bind(']', [], function () { choices(entries, title, space, windows, choose, page + 1); });
+        function previousPage() { choices(entries, title, space, windows, choose, page - 1); }
+        function nextPage() { choices(entries, title, space, windows, choose, page + 1); }
+        bind('[', [], previousPage);
+        bind(']', [], nextPage);
+        bind('pageUp', [], previousPage);
+        bind('pageDown', [], nextPage);
+        bind('space', [], nextPage);
+        bind('space', ['shift'], previousPage);
         show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges);
     }
 
