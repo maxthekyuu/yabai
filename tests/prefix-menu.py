@@ -105,8 +105,50 @@ class PrefixMenuTests(unittest.TestCase):
         self.assertLess(first['width'], 100)
         self.assertLess(first['height'], 40)
 
+    def search(self, entries, query='', selected=0):
+        OUTPUT.mkdir(exist_ok=True)
+        payload = {'text': 'Window search', 'search': entries, 'query': query, 'selected': selected,
+                   'screen': {'x': 0, 'y': 0, 'width': 1400, 'height': 1000}}
+        result = subprocess.run([str(BINARY), '--snapshot', str(OUTPUT / 'prefix-search.png'), json.dumps(payload)],
+                                capture_output=True, text=True, check=True)
+        return json.loads(result.stdout)['search']
+
+    def test_incremental_search_groups_and_unicode(self):
+        entries = [
+            {'index': 0, 'display': 2, 'label': 'S3 (2) Editor: Café notes', 'text': 'Editor: Café notes',
+             'rect': {'x': -1000, 'y': 0, 'w': 600, 'h': 800}},
+            {'index': 1, 'display': 1, 'label': 'S1 (1) Terminal: build', 'text': 'Terminal: build'},
+            {'index': 2, 'display': 1, 'label': 'S1 (1) Editor: README', 'text': 'Editor: README'},
+        ]
+        all_results = self.search(entries)
+        self.assertEqual([g['display'] for g in all_results['groups']], [1, 2])
+        filtered = self.search(entries, 'EDITOR')
+        self.assertEqual(filtered['indices'], [2, 0])
+        self.assertEqual([g['display'] for g in filtered['groups']], [1, 2])
+        narrowed = self.search(entries, 'editor cafe')
+        self.assertEqual(narrowed['indices'], [0])
+        self.assertEqual(narrowed['badges'][0]['rect']['x'], -1000)
+        self.assertEqual(self.search(entries, 'no such window')['indices'], [])
+        self.assertEqual(len(self.search(entries, '')['matches']), 3)
+        self.search(entries, 'editor') # Keep a grouped snapshot for visual inspection.
+
+    def test_search_pages_and_selection(self):
+        entries = [{'index': i, 'display': i % 3 + 1, 'label': f'Window {i}', 'text': f'Window {i}'} for i in range(80)]
+        state = self.search(entries, selected=79)
+        self.assertGreater(len(state['pages']), 1)
+        self.assertIn(state['matches'][79]['index'], state['indices'])
+        self.assertLessEqual(len(state['indices']), 29)
+        self.assertEqual(self.search(entries, 'Window 79')['indices'], [79])
+
+    def test_search_keyboard_controller(self):
+        OUTPUT.mkdir(exist_ok=True)
+        binary = OUTPUT / 'prefix-search-test'
+        subprocess.run(['xcrun', 'clang', str(ROOT / 'tests/prefix-search.m'), '-fobjc-arc',
+                        '-Wno-unused-parameter', '-framework', 'Cocoa', '-o', str(binary)], check=True, capture_output=True)
+        subprocess.run([str(binary)], check=True, capture_output=True)
+
     def test_invalid_payload(self):
-        for value in [json.dumps({'text': 'test', 'badges': [{'key': '0', 'rect': {}}]}),
+        for value in [json.dumps({'text': 'test', 'search': [None]}), json.dumps({'text': 'test', 'badges': [{'key': '0', 'rect': {}}]}),
                       json.dumps({'text': 'test', 'badges': [None] * 33}), 'not json', '{}', '[]', json.dumps({'text': 123}), json.dumps({'text': 'test', 'groups': [1]}),
                       json.dumps({'text': 'test', 'groups': [{'start': 0, 'end': 5, 'display': 1}]}),
                       json.dumps({'text': 'test', 'screen': {'x': 0, 'y': 0, 'width': 'bad', 'height': 800}})]:
