@@ -373,8 +373,8 @@ assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1,2,3]);
 press('escape'); idle();
 // Resize the selected frame without depending on a focused application window.
 for (const [key, amount] of [['h','horizontal:-40'],['l','horizontal:40'],['k','vertical:-40'],['j','vertical:40']]) {
-    open(space, []); press(key, ['shift']); expectCommand(['space','2','--resize-frame',amount]);
-    reply(null); refresh(); press('escape'); idle();
+    open(space, []); press('r', ['shift']); press(key); expectCommand(['space','2','--resize-frame',amount]);
+    reply(null); assert.ok(lastMenu.text.includes('Resize frame')); press('escape'); refresh(); press('escape'); idle();
 }
 for (const [key, axis] of [['h','horizontal'],['v','vertical'],['b','both']]) {
     open(); press('e', ['shift']); press(key); expectCommand(['space','2','--equalize-frames',axis]);
@@ -461,6 +461,18 @@ for (const frames of [moveTargetSpace.frames.filter(f=>f.id!==3),
 openRemoteMove(); reply(moveSpaces); reply(space); reply(null); reply(moveTargetSpace);
 expectCommand(['space','3','--focus-frame','3']); press('escape'); reply(null);
 assert.equal(tasks.length,0); idle();
+// Shift-W removes; Shift-R never accidentally removes a frame.
+open(); press('w',['shift']); expectCommand(['space','2','--remove-frame']); reply(null); refresh(); press('escape'); idle();
+const stacked = {...space,frames:[{...space.frames[0],windows:[10,20,30],'active-window':10}]};
+for (const [key,id] of [['j','20'],['k','30']]) {
+    open(stacked); press(key,['shift']); expectCommand(['window','--focus',id]); reply(null); refresh(stacked); press('escape'); idle();
+}
+open({...space,frames:space.frames.map(f=>({...f,selected:f.id===7}))});
+press('j',['shift']); press('k',['shift']); assert.equal(tasks.length,0); press('escape'); idle();
+context.yabaiRatpoison.configure({font:'Menlo',fontSize:18,selectionWeight:'bold',colors:{title:'#abcdef'},displayColors:['#ff8800']});
+open(); assert.equal(lastMenu.theme.font,'Menlo'); assert.equal(lastMenu.theme.fontSize,18);
+assert.equal(lastMenu.theme.colors.title,'#abcdef'); press('escape'); idle();
+context.yabaiRatpoison.configure({font:'GoMono Nerd Font Mono',fontSize:12,colors:{},displayColors:['#55ffff','#ff55ff']});
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

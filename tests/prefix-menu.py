@@ -15,16 +15,16 @@ OUTPUT = ROOT / 'tests/bin'
 
 
 class PrefixMenuTests(unittest.TestCase):
-    def render(self, name, text, screen, groups=None, badges=None):
+    def render(self, name, text, screen, groups=None, badges=None, theme=None):
         OUTPUT.mkdir(exist_ok=True)
         path = OUTPUT / name
         result = subprocess.run(
-            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen, 'groups': groups or [], 'badges': badges or []})],
+            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen, 'groups': groups or [], 'badges': badges or [], 'theme': theme or {}})],
             capture_output=True, text=True, check=True,
         )
         metrics = json.loads(result.stdout)
-        self.assertIn('GoMono', metrics['font'])
-        self.assertEqual(metrics['size'], 12)
+        self.assertIn((theme or {}).get('font', 'GoMono').split()[0], metrics['font'])
+        self.assertEqual(metrics['size'], (theme or {}).get('fontSize', 12))
         self.assertLessEqual(metrics['width'], screen['width'] - 32)
         self.assertLessEqual(metrics['height'], screen['height'] - 32)
         image = path.read_bytes()
@@ -44,7 +44,12 @@ class PrefixMenuTests(unittest.TestCase):
         self.assertIn(color, (2, 6))  # RGB or RGBA
         # All PNG predictors are zero at the first pixel of the first row.
         row = zlib.decompress(chunks[b'IDAT'])
-        self.assertEqual(row[1:4], b'\x00\x00\x00', 'background must be solid black')
+        expected = (theme or {}).get('colors', {}).get('background', '#000000')
+        if expected == '#000000':
+            self.assertEqual(row[1:4], b'\x00\x00\x00', 'default background must be black')
+        else:
+            # Snapshot RGB channels are transformed by the display color profile.
+            self.assertNotEqual(row[1:4], b'\x00\x00\x00', 'custom background must be applied')
         if color == 6:
             self.assertEqual(row[4], 255, 'background must be fully opaque')
         return metrics
@@ -147,8 +152,20 @@ class PrefixMenuTests(unittest.TestCase):
                         '-Wno-unused-parameter', '-framework', 'Cocoa', '-o', str(binary)], check=True, capture_output=True)
         subprocess.run([str(binary)], check=True, capture_output=True)
 
+    def test_theme_font_size_and_colors(self):
+        theme = {'font': 'Menlo', 'fontSize': 18, 'selectionWeight': 'bold',
+                 'displayColors': ['#ff8800', '#88ff00'],
+                 'colors': {'background': '#112233', 'text': '#dddddd', 'title': '#ff8800',
+                            'selectionText': '#ffffff', 'selectionBackground': '#554400'}}
+        self.render('prefix-themed.png', 'Window search\n/ editor\n\n│ > 0 Editor: notes │\nPage 1/1',
+                    {'x': 0, 'y': 0, 'width': 1400, 'height': 1000}, theme=theme)
+
     def test_invalid_payload(self):
-        for value in [json.dumps({'text': 'test', 'search': [None]}), json.dumps({'text': 'test', 'badges': [{'key': '0', 'rect': {}}]}),
+        for value in [json.dumps({'text':'test','theme':{'fontSize':0}}),
+                      json.dumps({'text':'test','theme':{'colors':{'text':'red'}}}),
+                      json.dumps({'text':'test','theme':{'displayColors':[]}}),
+                      json.dumps({'text':'test','theme':{'font':'DefinitelyNotInstalledFont'}}),
+                      json.dumps({'text': 'test', 'search': [None]}), json.dumps({'text': 'test', 'badges': [{'key': '0', 'rect': {}}]}),
                       json.dumps({'text': 'test', 'badges': [None] * 33}), 'not json', '{}', '[]', json.dumps({'text': 123}), json.dumps({'text': 'test', 'groups': [1]}),
                       json.dumps({'text': 'test', 'groups': [{'start': 0, 'end': 5, 'display': 1}]}),
                       json.dumps({'text': 'test', 'screen': {'x': 0, 'y': 0, 'width': 'bad', 'height': 800}})]:

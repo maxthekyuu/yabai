@@ -9,6 +9,54 @@ static NSColor *terminal_color(unsigned rgb)
                              blue:(rgb & 255) / 255.0 alpha:1.0];
 }
 
+static NSDictionary *menu_theme;
+static NSFont *menu_font;
+
+static NSColor *theme_color(NSString *name, unsigned fallback)
+{
+    NSString *value = menu_theme[@"colors"][name];
+    if (!value) return terminal_color(fallback);
+    unsigned color = 0;
+    [[NSScanner scannerWithString:[value substringFromIndex:1]] scanHexInt:&color];
+    return terminal_color(color);
+}
+
+static NSColor *display_color(NSUInteger display)
+{
+    NSArray *palette = menu_theme[@"displayColors"];
+    if (palette.count) {
+        unsigned color = 0;
+        [[NSScanner scannerWithString:[palette[(display ? display - 1 : 0) % palette.count] substringFromIndex:1]] scanHexInt:&color];
+        return terminal_color(color);
+    }
+    const unsigned colors[] = { 0x55ffff, 0xff55ff, 0x55ff55, 0xffff55, 0x5555ff, 0xff5555 };
+    return terminal_color(colors[(display ? display - 1 : 0) % 6]);
+}
+
+static BOOL theme_hex_valid(id value)
+{
+    return [value isKindOfClass:NSString.class] && [value length] == 7 && [value hasPrefix:@"#"] &&
+        [[value substringFromIndex:1] rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefABCDEF"] invertedSet]].location == NSNotFound;
+}
+
+static BOOL configure_theme(id theme)
+{
+    if (theme && ![theme isKindOfClass:NSDictionary.class]) return NO;
+    if (theme[@"font"] && ![theme[@"font"] isKindOfClass:NSString.class]) return NO;
+    if (theme[@"fontSize"] && (![theme[@"fontSize"] isKindOfClass:NSNumber.class] ||
+        !isfinite([theme[@"fontSize"] doubleValue]) || [theme[@"fontSize"] doubleValue] < 6 || [theme[@"fontSize"] doubleValue] > 36)) return NO;
+    if (theme[@"selectionWeight"] && ![@[@"bold", @"regular"] containsObject:theme[@"selectionWeight"]]) return NO;
+    id colors = theme[@"colors"];
+    if (colors && ![colors isKindOfClass:NSDictionary.class]) return NO;
+    for (NSString *name in colors) if (!theme_hex_valid(colors[name])) return NO;
+    id palette = theme[@"displayColors"];
+    if (palette && (![palette isKindOfClass:NSArray.class] || ![palette count])) return NO;
+    for (id color in palette) if (!theme_hex_valid(color)) return NO;
+    menu_theme = theme ?: @{};
+    menu_font = [NSFont fontWithName:theme[@"font"] ?: @"GoMono Nerd Font Mono" size:theme[@"fontSize"] ? [theme[@"fontSize"] doubleValue] : 12];
+    return menu_font != nil;
+}
+
 @interface PrefixMenuView : NSView
 @property(nonatomic, strong) NSArray<NSString *> *lines;
 @property(nonatomic, strong) NSFont *font;
@@ -21,17 +69,26 @@ static NSColor *terminal_color(unsigned rgb)
 - (BOOL)isOpaque { return YES; }
 - (void)drawRect:(NSRect)dirtyRect
 {
-    [[NSColor blackColor] setFill];
+    [theme_color(@"background", 0x000000) setFill];
     NSRectFill(self.bounds);
     CGFloat y = 14;
     for (NSUInteger i = 0; i < self.lines.count; ++i) {
         NSString *line = self.lines[i];
-        unsigned color = 0xc0c0c0;
-        if (i == 0) color = 0x55ffff;
-        else if (i == 1) color = 0xffff55;
-        else if ([line hasPrefix:@"arrows/"] || [line hasPrefix:@"Shift-"]) color = 0xaaaaaa;
-        NSDictionary *attributes = @{ NSFontAttributeName: self.font,
-                                      NSForegroundColorAttributeName: terminal_color(color) };
+        NSColor *color = theme_color(@"text", 0xc0c0c0);
+        if (i == 0) color = theme_color([line hasPrefix:@"yabai:"] ? @"error" : @"title", [line hasPrefix:@"yabai:"] ? 0xff5555 : 0x55ffff);
+        else if (i == 1) color = theme_color(@"accent", 0xffff55);
+        else if ([line hasPrefix:@"Page "]) color = theme_color(@"status", 0xaaaaaa);
+        else if ([line hasPrefix:@"Shift-"] || [line hasPrefix:@"["] || [line hasPrefix:@"hjkl/"] ||
+                 [line hasPrefix:@"Type "] || [line hasPrefix:@"Tab:"] || [line hasPrefix:@"Esc "]) color = theme_color(@"help", 0xaaaaaa);
+        BOOL selected = [line hasPrefix:@"│ > "];
+        NSFont *font = self.font;
+        if (selected) {
+            [theme_color(@"selectionBackground", 0x004444) setFill];
+            NSRectFill(NSMakeRect(14, y, self.bounds.size.width - 28, self.lineHeight));
+            color = theme_color(@"selectionText", 0xffffff);
+            if (![menu_theme[@"selectionWeight"] isEqual:@"regular"]) font = [[NSFontManager sharedFontManager] convertFont:font toHaveTrait:NSBoldFontMask];
+        }
+        NSDictionary *attributes = @{ NSFontAttributeName: font, NSForegroundColorAttributeName: color };
         // Clip each line independently: fallback glyphs and long titles cannot
         // spill into the footer or outside the screen-sized panel.
         [NSGraphicsContext saveGraphicsState];
@@ -42,18 +99,17 @@ static NSColor *terminal_color(unsigned rgb)
                 NSRegularExpression *expression = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
                 for (NSTextCheckingResult *match in [expression matchesInString:line options:0 range:NSMakeRange(0, line.length)]) {
                     [text addAttribute:NSForegroundColorAttributeName
-                                 value:terminal_color([pattern hasPrefix:@"\\*"] ? 0x55ff55 : 0xffff55) range:match.range];
+                                 value:theme_color([pattern hasPrefix:@"\\*"] ? @"activeFrame" : @"emptyFrame", [pattern hasPrefix:@"\\*"] ? 0x55ff55 : 0xffff55) range:match.range];
                 }
             }
         }
         // Display colors decorate the outline and heading, preserving readable
         // gray text and the existing selected/empty-frame highlights inside.
-        const unsigned palette[] = { 0x55ffff, 0xff55ff, 0x55ff55, 0xffff55, 0x5555ff, 0xff5555 };
         for (NSDictionary *group in self.groups) {
             NSUInteger start = [group[@"start"] unsignedIntegerValue], end = [group[@"end"] unsignedIntegerValue];
             if (i < start || i > end || !line.length) continue;
             NSUInteger display = [group[@"display"] unsignedIntegerValue];
-            NSColor *outline = terminal_color(palette[(display ? display - 1 : 0) % 6]);
+            NSColor *outline = display_color(display);
             if (i == start || i == end) [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(0, line.length)];
             else {
                 [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(0, 1)];
@@ -83,13 +139,13 @@ static NSColor *terminal_color(unsigned rgb)
 - (BOOL)isOpaque { return YES; }
 - (void)drawRect:(NSRect)dirtyRect
 {
-    [NSColor.blackColor setFill];
+    [theme_color(@"hintBackground", 0x000000) setFill];
     NSRectFill(self.bounds);
-    [self.color setStroke];
+    [(menu_theme[@"colors"][@"hintBorder"] ? theme_color(@"hintBorder", 0) : self.color) setStroke];
     NSBezierPath *outline = [NSBezierPath bezierPathWithRect:NSInsetRect(self.bounds, 1, 1)];
     outline.lineWidth = 2;
     [outline stroke];
-    NSDictionary *attributes = @{ NSFontAttributeName: self.font, NSForegroundColorAttributeName: self.color };
+    NSDictionary *attributes = @{ NSFontAttributeName: self.font, NSForegroundColorAttributeName: menu_theme[@"colors"][@"hintText"] ? theme_color(@"hintText", 0) : self.color };
     NSSize size = [self.keys sizeWithAttributes:attributes];
     [self.keys drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2,
                                       (self.bounds.size.height - size.height) / 2) withAttributes:attributes];
@@ -139,11 +195,10 @@ static NSArray *hint_layout(id badges, NSFont *font)
 
 static PrefixHintView *hint_view(NSDictionary *hint, NSFont *font)
 {
-    const unsigned colors[] = { 0x55ffff, 0xff55ff, 0x55ff55, 0xffff55, 0x5555ff, 0xff5555 };
     PrefixHintView *view = [[PrefixHintView alloc] initWithFrame:NSMakeRect(0, 0, [hint[@"width"] doubleValue], [hint[@"height"] doubleValue])];
     view.font = font; view.keys = hint[@"keys"];
     NSUInteger display = [hint[@"display"] unsignedIntegerValue];
-    view.color = terminal_color(colors[(display ? display - 1 : 0) % 6]);
+    view.color = display_color(display);
     return view;
 }
 
@@ -156,7 +211,7 @@ static BOOL search_entries_valid(id entries)
             ![entry[@"text"] isKindOfClass:NSString.class] || ![entry[@"index"] isKindOfClass:NSNumber.class] ||
             ![entry[@"display"] isKindOfClass:NSNumber.class] || [entry[@"display"] integerValue] < 1) return NO;
         if (entry[@"rect"] && !hint_layout(@[@{ @"key":@"0", @"rect":entry[@"rect"], @"display":entry[@"display"] }],
-                                            [NSFont fontWithName:@"GoMono Nerd Font Mono" size:12])) return NO;
+                                            (menu_font ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]))) return NO;
     }
     return YES;
 }
@@ -259,7 +314,7 @@ static NSDictionary *search_layout(NSArray *entries, NSString *query, NSInteger 
     while (self.badges.count < hints.count) {
         PrefixMenuPanel *badge = [[PrefixMenuPanel alloc] initWithContentRect:NSZeroRect
             styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
-        badge.opaque = YES; badge.backgroundColor = NSColor.blackColor; badge.hasShadow = NO;
+        badge.opaque = YES; badge.backgroundColor = theme_color(@"hintBackground", 0); badge.hasShadow = NO;
         badge.ignoresMouseEvents = YES; badge.hidesOnDeactivate = NO; badge.level = NSStatusWindowLevel + 1;
         badge.collectionBehavior = self.panel.collectionBehavior;
         [self.badges addObject:badge];
@@ -336,21 +391,25 @@ static void run_search(NSArray *entries, NSFont *font, NSRect screen)
         screen.origin.y + (screen.size.height - height) / 2, width, height)
         styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
     controller.panel.searchController = controller;
-    controller.panel.backgroundColor = NSColor.blackColor; controller.panel.opaque = YES;
+    controller.panel.backgroundColor = theme_color(@"background", 0); controller.panel.opaque = YES;
     controller.panel.level = NSStatusWindowLevel;
     controller.panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary | NSWindowCollectionBehaviorIgnoresCycle;
     controller.view = [[PrefixMenuView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
     controller.view.font = font; controller.view.lineHeight = lineHeight;
     controller.panel.contentView = controller.view;
     controller.field = [[NSTextField alloc] initWithFrame:NSMakeRect(14, 14 + lineHeight, width - 28, lineHeight + 4)];
-    controller.field.font = font; controller.field.textColor = terminal_color(0xc0c0c0);
-    controller.field.backgroundColor = NSColor.blackColor; controller.field.bordered = NO;
-    controller.field.focusRingType = NSFocusRingTypeNone; controller.field.placeholderString = @"Search app or window title…";
+    controller.field.font = font; controller.field.textColor = theme_color(@"inputText", 0xc0c0c0);
+    controller.field.backgroundColor = theme_color(@"inputBackground", 0); controller.field.bordered = NO;
+    controller.field.focusRingType = NSFocusRingTypeNone; controller.field.placeholderAttributedString = [[NSAttributedString alloc] initWithString:@"Search app or window title…" attributes:@{NSForegroundColorAttributeName:theme_color(@"placeholder", 0x777777), NSFontAttributeName:font}];
     controller.field.delegate = controller;
     [controller.view addSubview:controller.field];
     [controller refresh];
     [controller.panel makeKeyAndOrderFront:nil];
     [controller.panel makeFirstResponder:controller.field];
+    NSTextView *editor = (NSTextView *)controller.field.currentEditor;
+    editor.insertionPointColor = theme_color(@"caret", 0xffffff);
+    editor.selectedTextAttributes = @{NSForegroundColorAttributeName:theme_color(@"inputSelectionText", 0xffffff),
+                                      NSBackgroundColorAttributeName:theme_color(@"inputSelectionBackground", 0x005577)};
     [NSApp run];
 }
 
@@ -370,11 +429,11 @@ int main(int argc, const char **argv)
         }
         [NSApplication sharedApplication];
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-        NSFont *font = [NSFont fontWithName:@"GoMono Nerd Font Mono" size:12];
-        if (!font) {
-            fprintf(stderr, "install the GoMono Nerd Font Mono font before using the prefix menu\n");
+        if (!configure_theme(payload[@"theme"])) {
+            fprintf(stderr, "invalid theme or unavailable font; check font, fontSize (6-36), and #RRGGBB colors\n");
             return 1;
         }
+        NSFont *font = menu_font;
         NSRect screen = NSScreen.mainScreen.visibleFrame;
         id geometry = payload[@"screen"];
         if ([geometry isKindOfClass:[NSDictionary class]]) {
@@ -433,7 +492,7 @@ int main(int argc, const char **argv)
             [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
             NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
             if (![png writeToFile:[NSString stringWithUTF8String:argv[2]] atomically:YES]) return 1;
-            NSDictionary *metrics = @{ @"font":font.fontName, @"size":@12, @"width":@(size.width), @"height":@(size.height), @"badges":hints, @"search":searchState ?: @{} };
+            NSDictionary *metrics = @{ @"font":font.fontName, @"size":@(font.pointSize), @"width":@(size.width), @"height":@(size.height), @"badges":hints, @"search":searchState ?: @{} };
             NSData *json = [NSJSONSerialization dataWithJSONObject:metrics options:0 error:NULL];
             puts([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
             if (hints.count) {
@@ -451,7 +510,7 @@ int main(int argc, const char **argv)
             styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
             backing:NSBackingStoreBuffered defer:NO];
         panel.contentView = view;
-        panel.backgroundColor = NSColor.blackColor;
+        panel.backgroundColor = theme_color(@"background", 0);
         panel.opaque = YES;
         panel.hasShadow = YES;
         panel.ignoresMouseEvents = YES;
@@ -469,7 +528,7 @@ int main(int argc, const char **argv)
                 styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
                 backing:NSBackingStoreBuffered defer:NO];
             badge.contentView = hint_view(hint, font);
-            badge.backgroundColor = NSColor.blackColor;
+            badge.backgroundColor = theme_color(@"hintBackground", 0);
             badge.opaque = YES; badge.hasShadow = NO;
             badge.ignoresMouseEvents = YES; badge.hidesOnDeactivate = NO;
             badge.level = NSStatusWindowLevel + 1;

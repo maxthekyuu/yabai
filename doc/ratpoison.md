@@ -74,7 +74,9 @@ are rejected without partial changes. Applications can still enforce their own
 minimum window sizes.
 
 Within the prefix menu, **Shift-H/L** shrinks/grows width by 40 points and
-**Shift-K/J** shrinks/grows height by 40 points. **Shift-E** opens equalization:
+**Shift-R** opens resize mode, where h/l or Left/Right changes width and
+k/j or Up/Down changes height by 40 points. Resize mode stays open for repeated
+adjustments; Escape returns to the chooser. **Shift-E** opens equalization:
 `h` for equal widths, `v` for equal heights, `b` for both. The same size menu
 has left:right width presets: `1` = **1:2**, `2` = **1:1**, `3` = **2:1**.
 Escape returns to the chooser. These numbers select ratios only inside the size
@@ -158,7 +160,9 @@ Press **Super-S (Command-S)**, release it, then choose:
 | `Shift-D`, then a label | Focus a physical display's visible Space |
 | `Shift-U`, then a label | Focus a virtual desktop (Space) |
 | `Tab` / `Shift-Tab` | Next / previous frame |
-| `Shift-R` | Remove selected frame |
+| `Shift-R` | Resize selected frame with arrows/hjkl; Escape returns |
+| `Shift-W` | Remove selected frame |
+| `Shift-J` / `Shift-K` | Next / previous window in the selected frame’s stack |
 | `Shift-O` | Keep only selected frame, collecting its windows |
 | `Shift-T` | Toggle ratpoison; leaving it always chooses floating |
 | `[` / `]`, Page Up / Page Down | Previous / next page of choices |
@@ -172,6 +176,45 @@ the menu. Choosing the already-active mode leaves its layout intact. Mode keys
 work in floating and BSP as well; the menu continues to list their windows.
 Floating-mode directional navigation chooses the nearest window centre in that
 direction; BSP uses yabai's existing managed-window navigation.
+
+### Appearance configuration
+
+Set a global configuration **before** loading the Phoenix module, or call
+`yabaiRatpoison.configure({...})` afterward. Changes apply the next time the menu
+is rendered. Use an installed monospaced font to keep boxes and columns aligned.
+Font size is 6–36 points; colors are opaque `#RRGGBB` strings.
+
+```js
+var yabaiRatpoisonConfig = {
+    font: 'GoMono Nerd Font Mono',
+    fontSize: 12,
+    selectionWeight: 'bold', // 'bold' or 'regular'
+    displayColors: ['#55ffff', '#ff55ff', '#55ff55', '#ffff55', '#5555ff', '#ff5555'],
+    colors: {
+        background: '#000000', text: '#c0c0c0',
+        title: '#55ffff', accent: '#ffff55', help: '#aaaaaa', status: '#aaaaaa',
+        activeFrame: '#55ff55', emptyFrame: '#ffff55', error: '#ff5555',
+        selectionText: '#ffffff', selectionBackground: '#004444',
+        hintBackground: '#000000',
+        // Optional hintText/hintBorder override the corresponding display color.
+        inputText: '#c0c0c0', inputBackground: '#000000', placeholder: '#777777',
+        caret: '#ffffff', inputSelectionText: '#ffffff', inputSelectionBackground: '#005577'
+    }
+};
+require('/Users/jkuhn/Software/yabai/examples/phoenix-ratpoison.js');
+```
+
+Unspecified settings retain their defaults. `displayColors` cycles by physical
+display number and controls headings, outlines, and default label colors.
+`selectionText`, `selectionBackground`, and `selectionWeight` style the selected
+search row in addition to its `>` marker. Font and size apply to menu text,
+search input, and centered labels. Window-frame borders retain their existing
+yabai configuration described above. Invalid colors, sizes, or unavailable fonts
+produce a visible configuration error.
+
+Shift-J/K wraps within the selected frame's stable window list; empty and
+single-window frames do nothing. It does not accidentally cycle the old focused
+window when an empty frame is selected.
 
 ### Search windows
 

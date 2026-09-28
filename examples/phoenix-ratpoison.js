@@ -1,6 +1,7 @@
 /* Super-S (Command-S) prefix. Load through ~/.phoenix.js. The running yabai
  * daemon must support ratpoison frames. Release Command before the next key. */
 var yabaiRatpoison = (function () {
+    var theme = typeof yabaiRatpoisonConfig === 'object' && yabaiRatpoisonConfig ? yabaiRatpoisonConfig : {};
     var executable = '/opt/homebrew/bin/yabai';
     var renderer = '/Users/jkuhn/Software/yabai/bin/yabai-prefix';
     // 1/2/3 select layouts; h/j/k/l navigate. Never reuse command keys as hints.
@@ -44,7 +45,7 @@ var yabaiRatpoison = (function () {
         var current = rendererGeneration;
         // env execs the helper without a shell. A missing helper then produces
         // exit 127 and a callback; Phoenix otherwise only logs launch failures.
-        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search, screen: Screen.main().visibleFrame() })], function (task) {
+        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search, theme: theme, screen: Screen.main().visibleFrame() })], function (task) {
             if (current !== rendererGeneration) return;
             rendererTask = null;
             if (task.status === 0) {
@@ -62,10 +63,12 @@ var yabaiRatpoison = (function () {
             // leaving invisible bindings enabled. This is an error fallback.
             cancel();
             modal = new Modal();
-            modal.font = 'GoMono Nerd Font Mono';
-            modal.weight = 12;
+            modal.font = theme.font || 'GoMono Nerd Font Mono';
+            modal.weight = theme.fontSize || 12;
             modal.appearance = 'dark';
-            modal.setTextColor(255, 85, 85, 1);
+            var errorColor = theme.colors && theme.colors.error;
+            var rgb = /^#[0-9a-f]{6}$/i.test(errorColor || '') ? parseInt(errorColor.slice(1), 16) : 0xff5555;
+            modal.setTextColor((rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255, 1);
             modal.text = 'Prefix renderer: ' + clean(task.error || 'build bin/yabai-prefix and check its path').slice(0, 100);
             modal.duration = 3;
             modal.show();
@@ -96,14 +99,14 @@ var yabaiRatpoison = (function () {
 
     // Keep the chooser visible while navigating/splitting so empty-frame
     // selection is visible and several moves can follow a single prefix.
-    function update(args) {
+    function update(args, complete) {
         var current = ++generation;
         clearKeys();
         bind('escape', [], cancel);
         run(args, function (task) {
             if (!active || generation !== current) return;
             if (task.status !== 0) { error(task.error || task.output || 'command failed'); return; }
-            load('windows');
+            if (complete) complete(); else load('windows');
         });
     }
 
@@ -153,6 +156,25 @@ var yabaiRatpoison = (function () {
         return true;
     }
 
+    function resizeMenu(space) {
+        clearKeys();
+        bind('escape', [], function () { load('windows'); });
+        [['h', 'left', 'horizontal:-40'], ['l', 'right', 'horizontal:40'],
+         ['k', 'up', 'vertical:-40'], ['j', 'down', 'vertical:40']].forEach(function (entry) {
+            function resize() { update(['space', String(space.index), '--resize-frame', entry[2]], function () { resizeMenu(space); }); }
+            bind(entry[0], [], resize); bind(entry[1], [], resize);
+        });
+        show('Resize frame\nh/l or left/right: width -/+40\nk/j or up/down: height -/+40\nEsc back to chooser');
+    }
+
+    function cycleStack(space, direction) {
+        var frame = (space.frames || []).filter(function (frame) { return frame.selected; })[0];
+        if (!frame || frame.windows.length < 2) return;
+        var index = Math.max(0, frame.windows.indexOf(frame['active-window']));
+        var target = frame.windows[(index + direction + frame.windows.length) % frame.windows.length];
+        update(['window', '--focus', String(target)]);
+    }
+
     function controls(space, windows) {
         bind('escape', [], cancel);
         ['ratpoison', 'float', 'bsp'].forEach(function (layout, index) {
@@ -176,7 +198,7 @@ var yabaiRatpoison = (function () {
         bind('f', ['shift'], function () { load('frames'); });
         if (space.type !== 'ratpoison') return;
         var args = ['space', String(space.index)];
-        [['h', 'horizontal:-40'], ['l', 'horizontal:40'], ['k', 'vertical:-40'], ['j', 'vertical:40']].forEach(function (entry) {
+        [['h', 'horizontal:-40'], ['l', 'horizontal:40']].forEach(function (entry) {
             bind(entry[0], ['shift'], function () { update(args.concat(['--resize-frame', entry[1]])); });
         });
         bind('e', ['shift'], function () {
@@ -192,7 +214,10 @@ var yabaiRatpoison = (function () {
         });
         bind('s', ['shift'], function () { update(args.concat(['--split', 'horizontal'])); });
         bind('v', ['shift'], function () { update(args.concat(['--split', 'vertical'])); });
-        bind('r', ['shift'], function () { update(args.concat(['--remove-frame'])); });
+        bind('r', ['shift'], function () { resizeMenu(space); });
+        bind('w', ['shift'], function () { update(args.concat(['--remove-frame'])); });
+        bind('j', ['shift'], function () { cycleStack(space, 1); });
+        bind('k', ['shift'], function () { cycleStack(space, -1); });
         bind('o', ['shift'], function () { update(args.concat(['--only-frame'])); });
         bind('tab', [], function () { update(args.concat(['--focus-frame', 'next'])); });
         bind('tab', ['shift'], function () { update(args.concat(['--focus-frame', 'prev'])); });
@@ -262,9 +287,12 @@ var yabaiRatpoison = (function () {
         // Allow the panel to grow to 90% of the usable height. Reserve text
         // rows for headings, controls and a permanent pagination status line.
         var chromeRows = space.type === 'ratpoison' ? 10 : 7;
-        var lineBudget = Math.floor((Math.min(screen.height * 0.9, screen.height - 32) - 28) / 18);
+        var fontSize = Number(theme.fontSize) || 12;
+        var rowHeight = Math.ceil(fontSize * 1.5);
+        var cellWidth = fontSize * 2 / 3;
+        var lineBudget = Math.floor((Math.min(screen.height * 0.9, screen.height - 32) - 28) / rowHeight);
         var rows = Math.max(1, lineBudget - chromeRows - 2);
-        var columnWidth = Math.max(12, Math.min(66, Math.floor((screen.width - 132) / (columns * 8)) - 3));
+        var columnWidth = Math.max(12, Math.min(66, Math.floor((screen.width - 132) / (columns * cellWidth)) - 3));
         var width = columns * (columnWidth + 3) + 1;
         var displays = {};
         entries.forEach(function (entry) {
@@ -326,8 +354,8 @@ var yabaiRatpoison = (function () {
                    ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
         lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-D/U screens');
         if (space.type === 'ratpoison') {
-            lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next',
-                       'Shift-H/L width   Shift-K/J height   Shift-E sizes');
+            lines.push('Shift-S/V split   Shift-F frames', 'Shift-W remove    Shift-O only     Tab next',
+                       'Shift-R resize   Shift-J/K stack   Shift-E sizes');
         }
         function previousPage() { choices(entries, title, space, windows, choose, page - 1); }
         function nextPage() { choices(entries, title, space, windows, choose, page + 1); }
@@ -675,5 +703,7 @@ var yabaiRatpoison = (function () {
 
     Key.on('s', ['cmd'], function (_, repeated) { if (!repeated) start(); });
     Event.on('mouseDidLeftClick', function () { if (!searching) cancel(); });
-    return { cancel: cancel, start: start };
+    return { cancel: cancel, start: start, configure: function (options) {
+        theme = Object.assign({}, theme, options);
+    } };
 }());
