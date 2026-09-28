@@ -12,6 +12,7 @@ static NSColor *terminal_color(unsigned rgb)
 @interface PrefixMenuView : NSView
 @property(nonatomic, strong) NSArray<NSString *> *lines;
 @property(nonatomic, strong) NSFont *font;
+@property(nonatomic, strong) NSArray *groups;
 @property(nonatomic) CGFloat lineHeight;
 @end
 
@@ -43,6 +44,20 @@ static NSColor *terminal_color(unsigned rgb)
                     [text addAttribute:NSForegroundColorAttributeName
                                  value:terminal_color([pattern hasPrefix:@"\\*"] ? 0x55ff55 : 0xffff55) range:match.range];
                 }
+            }
+        }
+        // Display colors decorate the outline and heading, preserving readable
+        // gray text and the existing selected/empty-frame highlights inside.
+        const unsigned palette[] = { 0x55ffff, 0xff55ff, 0x55ff55, 0xffff55, 0x5555ff, 0xff5555 };
+        for (NSDictionary *group in self.groups) {
+            NSUInteger start = [group[@"start"] unsignedIntegerValue], end = [group[@"end"] unsignedIntegerValue];
+            if (i < start || i > end || !line.length) continue;
+            NSUInteger display = [group[@"display"] unsignedIntegerValue];
+            NSColor *outline = terminal_color(palette[(display ? display - 1 : 0) % 6]);
+            if (i == start || i == end) [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(0, line.length)];
+            else {
+                [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(0, 1)];
+                [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(line.length - 1, 1)];
             }
         }
         [text drawAtPoint:NSMakePoint(14, y)];
@@ -105,6 +120,18 @@ int main(int argc, const char **argv)
         PrefixMenuView *view = [[PrefixMenuView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
         view.font = font;
         view.lines = lines;
+        id groups = payload[@"groups"];
+        if (groups && ![groups isKindOfClass:[NSArray class]]) return 1;
+        for (id group in groups) {
+            if (![group isKindOfClass:[NSDictionary class]]) return 1;
+            for (NSString *key in @[@"start", @"end", @"display"]) {
+                if (![group[key] isKindOfClass:[NSNumber class]]) return 1;
+            }
+            if ([group[@"start"] integerValue] < 0 || [group[@"end"] unsignedIntegerValue] >= lines.count ||
+                [group[@"start"] unsignedIntegerValue] > [group[@"end"] unsignedIntegerValue] ||
+                [group[@"display"] integerValue] < 1) return 1;
+        }
+        view.groups = groups;
         view.lineHeight = lineHeight;
         if (snapshot) {
             NSBitmapImageRep *bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];

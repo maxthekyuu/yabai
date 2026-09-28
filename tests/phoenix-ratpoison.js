@@ -125,14 +125,14 @@ const many = Array.from({ length: 80 }, (_, i) => ({ id: i + 1, app: 'App', titl
 function manySpace() { return { ...space, frames: [{ id: 0, windows: many.map(w => w.id) }] }; }
 open(manySpace(), many);
 assert.ok(lastMenu.text.includes('1/4'));
-assert.ok(lastMenu.text.split('\n').length <= 20);
+assert.ok(lastMenu.text.split('\n').length <= 22);
 assert.ok(!lastMenu.text.includes('\t'));
-press(']'); press('0'); expectCommand(['window', '--focus', '25']); reply(null); idle();
+press(']'); assert.ok(lastMenu.text.includes('Display 1 (continued)')); press('0'); expectCommand(['window', '--focus', '25']); reply(null); idle();
 screen = { x: -800, y: 200, width: 800, height: 500 };
 open(manySpace(), many);
-assert.ok(lastMenu.text.split('\n').length <= 20);
+assert.ok(lastMenu.text.split('\n').length <= 22);
 assert.deepEqual(lastMenu.screen, screen);
-assert.ok(lastMenu.text.split('\n').every(line => line.length <= 68));
+assert.ok(lastMenu.text.split('\n').every(line => line.length <= 70));
 press(']'); press('0'); expectCommand(['window', '--focus', '11']); reply(null); idle();
 // Display and Space containers are available in every layout. Move + follow
 // waits for WindowServer completion and keeps layout controls on the destination.
@@ -243,6 +243,10 @@ function visibleMenu(other = remoteFrames, otherWindows = remoteWindows, mode) {
 visibleMenu();
 assert.ok(lastMenu.text.includes('S3 (2)   F7 [empty]'));
 assert.ok(!lastMenu.text.includes('S4 (2)'));
+assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2]);
+assert.ok(lastMenu.text.includes('┌ Display 1 '));
+assert.ok(lastMenu.text.includes('┌ Display 2 '));
+fs.writeFileSync('/tmp/yabai-prefix-group-menu.json', JSON.stringify(lastMenu));
 press('5'); reply([single, remoteFrames]); reply(single);
 expectCommand(['space', '--focus', '3']); reply(null); reply(remoteFrames);
 expectCommand(['space', '3', '--focus-frame', '7']); reply(null); refresh(remoteFrames, remoteWindows);
@@ -267,6 +271,10 @@ assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 // Late remote queries cannot reopen a cancelled chooser.
 press('s', ['cmd']); reply(single); reply([windows[0]]); reply([single, remoteFrames]);
 press('escape'); reply(remoteWindows); idle();
+// Display order is physical-index order even when display 2 has focus.
+press('s', ['cmd']); reply(remote); reply([remoteWindows[0]]); reply([remote, single]); reply([windows[0]]);
+assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2]);
+press('4'); expectCommand(['window', '--focus', '30']); reply(null); idle();
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

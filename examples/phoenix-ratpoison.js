@@ -45,12 +45,12 @@ var yabaiRatpoison = (function () {
         timer = Timer.after(8, cancel);
     }
 
-    function show(text, duration) {
+    function show(text, duration, groups) {
         closeMenu();
         var current = rendererGeneration;
         // env execs the helper without a shell. A missing helper then produces
         // exit 127 and a callback; Phoenix otherwise only logs launch failures.
-        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, screen: Screen.main().visibleFrame() })], function (task) {
+        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], screen: Screen.main().visibleFrame() })], function (task) {
             if (current !== rendererGeneration) return;
             rendererTask = null;
             if (task.status === 0) { cancel(); return; }
@@ -196,34 +196,60 @@ var yabaiRatpoison = (function () {
         var screen = Screen.main().visibleFrame();
         var columns = screen.width >= 1100 ? 2 : 1;
         var rows = Math.max(1, Math.min(12, Math.floor((screen.height * 0.7 - 160) / 18)));
-        var capacity = Math.min(alphabet.length, rows * columns);
-        var pages = Math.max(1, Math.ceil(entries.length / capacity));
-        page = (page + pages) % pages;
-        var visible = entries.slice(page * capacity, (page + 1) * capacity);
-        var columnWidth = Math.max(12, Math.min(68, Math.floor((screen.width - 100) / (columns * 8)) - 3));
-        var width = columns * (columnWidth + 3) - 3;
-        var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages, width),
-                     clip('1 ratpoison   2 floating   3 bsp   Shift-T toggle', width), ''];
-        var cells = visible.map(function (entry, index) {
-            var key = alphabet[index];
-            bind(key, [], function () { choose(entry); });
-            return clip(key + ' ' + entry.label, columnWidth);
+        var columnWidth = Math.max(12, Math.min(66, Math.floor((screen.width - 132) / (columns * 8)) - 3));
+        var width = columns * (columnWidth + 3) + 1;
+        var displays = {};
+        entries.forEach(function (entry) {
+            var display = entry.space ? entry.space.display : space.display;
+            (displays[display] || (displays[display] = [])).push(entry);
         });
-        // Fill down each column so hint order follows the visible list.
-        var usedRows = Math.ceil(cells.length / columns);
-        for (var row = 0; row < usedRows; ++row) {
-            var line = cells[row];
-            if (cells[row + usedRows]) line = line.padEnd(columnWidth + 3, ' ') + cells[row + usedRows];
-            lines.push(line);
+        var pages = [], chunks = [], used = 0, count = 0;
+        function finishPage() {
+            if (chunks.length) pages.push(chunks);
+            chunks = []; used = 0; count = 0;
         }
-        if (!cells.length) lines.push('(no choices)');
+        Object.keys(displays).sort(function (a, b) { return Number(a) - Number(b); }).forEach(function (display) {
+            var items = displays[display], offset = 0;
+            while (offset < items.length) {
+                if (rows + 2 - used < 3 || count === alphabet.length) finishPage();
+                var take = Math.min(items.length - offset, (rows - used) * columns, alphabet.length - count);
+                chunks.push({ display: Number(display), continued: offset > 0, entries: items.slice(offset, offset + take) });
+                used += Math.ceil(take / columns) + 2;
+                count += take; offset += take;
+            }
+        });
+        finishPage();
+        if (!pages.length) pages.push([]);
+        page = (page + pages.length) % pages.length;
+        var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages.length, width),
+                     clip('1 ratpoison   2 floating   3 bsp   Shift-T toggle', width), ''];
+        var groups = [], hint = 0;
+        pages[page].forEach(function (group) {
+            var start = lines.length;
+            var heading = ' Display ' + group.display + (group.continued ? ' (continued)' : '') + ' ';
+            lines.push('┌' + heading + '─'.repeat(Math.max(0, width - heading.length - 2)) + '┐');
+            var cells = group.entries.map(function (entry) {
+                var key = alphabet[hint++];
+                bind(key, [], function () { choose(entry); });
+                return clip(key + ' ' + entry.label, columnWidth);
+            });
+            var usedRows = Math.ceil(cells.length / columns);
+            for (var row = 0; row < usedRows; ++row) {
+                var line = cells[row];
+                if (cells[row + usedRows]) line = line.padEnd(columnWidth + 3, ' ') + cells[row + usedRows];
+                lines.push('│ ' + line.padEnd(width - 4, ' ') + ' │');
+            }
+            lines.push('└' + '─'.repeat(width - 2) + '┘');
+            groups.push({ start: start, end: lines.length - 1, display: group.display });
+        });
+        if (!hint) lines.push('(no choices)');
         lines.push('', 'arrows/hjkl focus   [ ] page   Shift-F containers   Esc close', 'Shift-M move   Shift-D displays   Shift-U Spaces');
         if (space.type === 'ratpoison') {
             lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next');
         }
         bind('[', [], function () { choices(entries, title, space, windows, choose, page - 1); });
         bind(']', [], function () { choices(entries, title, space, windows, choose, page + 1); });
-        show(lines.map(function (line) { return clip(line, width); }).join('\n'));
+        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups);
     }
 
     // A display is a container whose destination is its currently visible Space.

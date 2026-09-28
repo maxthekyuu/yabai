@@ -101,7 +101,9 @@ direction; BSP uses yabai's existing managed-window navigation.
 ### Displays and virtual desktops
 
 The main `Super-S` chooser lists windows and frames on **all currently visible
-Spaces across physical displays**, with the active Space first. Every entry
+Spaces across physical displays**, grouped in physical display number order.
+Each display has a labeled box with its own terminal color. Large groups repeat
+their heading with `(continued)` on subsequent pages. Every entry
 starts with `Sx (display number)`. Empty ratpoison frames are selectable directly;
 an empty floating/BSP Space appears as an empty container. Hidden virtual
 desktops remain available through `Shift-U`.

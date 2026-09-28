@@ -15,11 +15,11 @@ OUTPUT = ROOT / 'tests/bin'
 
 
 class PrefixMenuTests(unittest.TestCase):
-    def render(self, name, text, screen):
+    def render(self, name, text, screen, groups=None):
         OUTPUT.mkdir(exist_ok=True)
         path = OUTPUT / name
         result = subprocess.run(
-            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen})],
+            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen, 'groups': groups or []})],
             capture_output=True, text=True, check=True,
         )
         metrics = json.loads(result.stdout)
@@ -68,8 +68,27 @@ class PrefixMenuTests(unittest.TestCase):
         self.render('prefix-small.png', 'YABAI  ratpoison\n1 ratpoison  2 floating  3 bsp\n\n0 * F1 [empty]\nEsc close',
                     {'x': -800, 'y': 200, 'width': 800, 'height': 500})
 
+    def test_display_groups(self):
+        text = '\n'.join([
+            'YABAI  ratpoison  |  visible windows / frames  |  1/1',
+            '1 ratpoison   2 floating   3 bsp', '',
+            '┌ Display 1 ──────────────────────────────────────────┐',
+            '│ 0 S1 (1) * F0 Terminal: build                        │',
+            '│ 4 S1 (1)   F1 [empty]                               │',
+            '└─────────────────────────────────────────────────────┘',
+            '┌ Display 2 ──────────────────────────────────────────┐',
+            '│ 5 S3 (2)   Browser: Project docs                     │',
+            '│ 6 S3 (2)   Editor: notes                             │',
+            '└─────────────────────────────────────────────────────┘', '',
+            'arrows/hjkl focus   [ ] page   Esc close',
+        ])
+        text = '\n'.join(line[:-1].ljust(54) + '│' if line.startswith('│') else line for line in text.split('\n'))
+        self.render('prefix-groups.png', text, {'x': 0, 'y': 0, 'width': 1440, 'height': 900},
+                    [{'start': 3, 'end': 6, 'display': 1}, {'start': 7, 'end': 10, 'display': 2}])
+
     def test_invalid_payload(self):
-        for value in ['not json', '{}', '[]', json.dumps({'text': 123}),
+        for value in ['not json', '{}', '[]', json.dumps({'text': 123}), json.dumps({'text': 'test', 'groups': [1]}),
+                      json.dumps({'text': 'test', 'groups': [{'start': 0, 'end': 5, 'display': 1}]}),
                       json.dumps({'text': 'test', 'screen': {'x': 0, 'y': 0, 'width': 'bad', 'height': 800}})]:
             result = subprocess.run([str(BINARY), '--snapshot', str(OUTPUT / 'invalid.png'), value], capture_output=True)
             self.assertNotEqual(result.returncode, 0)
