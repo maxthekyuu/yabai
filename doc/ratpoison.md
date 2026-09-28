@@ -163,9 +163,9 @@ Press **Super-S (Command-S)**, release it, then choose:
 | `Shift-T` | Toggle ratpoison; leaving it always chooses floating |
 | `[` / `]`, Page Up / Page Down | Previous / next page of choices |
 | Space / Shift-Space | Next / previous page of choices |
-| Escape, Super-S again, click, or 8 idle seconds | Close the menu |
+| Escape, Super-S again, or click | Close the menu |
 
-Navigation, splitting, and empty-frame selection keep the menu open and refresh
+The menu has no idle timeout. Navigation, splitting, and empty-frame selection keep the menu open and refresh
 its contents. `* F<id>` marks the selected frame; `[empty]` entries are directly
 selectable from the initial menu. Occupied-window choices and mode changes close
 the menu. Choosing the already-active mode leaves its layout intact. Mode keys

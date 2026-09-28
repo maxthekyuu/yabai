@@ -6,7 +6,6 @@ var yabaiRatpoison = (function () {
     // 1/2/3 select layouts; h/j/k/l navigate. Never reuse command keys as hints.
     var alphabet = '0456789abcdefgimnopqrstuvwxyz';
     var keys = [];
-    var timer = null;
     var transitionTimer = null;
     var modal = null;
     var rendererTask = null;
@@ -25,8 +24,6 @@ var yabaiRatpoison = (function () {
         queuedDirection = null;
         generation += 1;
         clearKeys();
-        if (timer !== null) Timer.off(timer);
-        timer = null;
         if (transitionTimer !== null) Timer.off(transitionTimer);
         transitionTimer = null;
         closeMenu();
@@ -38,11 +35,6 @@ var yabaiRatpoison = (function () {
         rendererTask = null;
         if (modal) modal.close();
         modal = null;
-    }
-
-    function resetTimeout() {
-        if (timer !== null) Timer.off(timer);
-        timer = Timer.after(8, cancel);
     }
 
     function show(text, duration, groups, badges) {
@@ -106,7 +98,6 @@ var yabaiRatpoison = (function () {
     function bind(key, modifiers, callback) {
         keys.push(Key.on(key, modifiers, function (_, repeated) {
             if (active && !repeated) {
-                resetTimeout();
                 callback();
             }
         }));
@@ -577,7 +568,6 @@ var yabaiRatpoison = (function () {
         if (active) { cancel(); return; }
         if (typeof hintsActive !== 'undefined' && hintsActive && typeof cancelHints === 'function') cancelHints();
         active = true;
-        resetTimeout();
         load('windows');
     }
 

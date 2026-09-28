@@ -119,8 +119,8 @@ open({ ...space, type: 'float' }); press('l'); expectCommand(['window', '--focus
 open(); press('escape'); assert.equal(tasks.length, 0); idle();
 press('s', ['cmd']); press('escape'); reply(space); assert.equal(tasks.length, 0); idle();
 press('s', ['cmd']); press('s', ['cmd']); reply(space); idle();
-open(); [...timers.values()][0](); idle(); assert.equal(timers.size, 0);
-// The native renderer's own timeout must also disable invisible shortcuts.
+open(); assert.equal(timers.size, 0); press('escape'); idle();
+// Unexpected renderer exit must also disable invisible shortcuts.
 open(); const [rendererId, rendererCallback] = [...renderers.entries()][0];
 renderers.delete(rendererId); rendererCallback({ status: 0 }); idle();
 // Lots of windows, long titles and small/negative-origin screens remain paged.

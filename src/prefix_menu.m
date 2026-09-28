@@ -257,8 +257,6 @@ int main(int argc, const char **argv)
             [badge orderFrontRegardless];
             [hintPanels addObject:badge];
         }
-        // A crash/reload of the controller cannot leave an orphaned HUD forever.
-        [NSTimer scheduledTimerWithTimeInterval:10 repeats:NO block:^(NSTimer *timer) { [NSApp terminate:nil]; }];
         [NSApp run];
     }
     return 0;
