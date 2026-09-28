@@ -173,3 +173,64 @@ bool view_ratpoison_only_frame(struct view *view)
     view->selected_frame = view->root;
     return true;
 }
+
+// Count parallel slots along one axis. Perpendicular branches share the same
+// extent, whereas parallel splits consume separate slots and intervening gaps.
+static unsigned ratpoison_axis_slots(struct window_node *node, enum window_node_split axis)
+{
+    if (window_node_is_leaf(node)) return 1;
+    unsigned left = ratpoison_axis_slots(node->left, axis);
+    unsigned right = ratpoison_axis_slots(node->right, axis);
+    return node->split == axis ? left + right : (left > right ? left : right);
+}
+
+// Plan once without mutation, then commit. Failed changes preserve all ratios,
+// selection, frame identities and window stacks.
+static bool ratpoison_plan_geometry(struct view *view, struct window_node *node, struct area area,
+                                   uint32_t axes, struct window_node *resized, float resize_ratio, bool commit)
+{
+    float minimum = g_space_manager.frame_border.enabled ? 2 * g_space_manager.frame_border.width + 1 : 1;
+    if (window_node_is_leaf(node)) return area.w >= minimum && area.h >= minimum;
+    float ratio = node == resized ? resize_ratio : node->ratio;
+    int gap = window_node_get_gap(view);
+    float extent = (node->split == SPLIT_Y ? area.w : area.h) - gap;
+    if (extent <= 0) return false;
+    if (axes & node->split) {
+        unsigned left = ratpoison_axis_slots(node->left, node->split);
+        unsigned right = ratpoison_axis_slots(node->right, node->split);
+        float unit = (extent - gap * (left + right - 2)) / (left + right);
+        ratio = (unit * left + gap * (left - 1)) / extent;
+    }
+    if (!isfinite(ratio) || ratio <= 0 || ratio >= 1) return false;
+    struct area left, right;
+    area_make_pair(node->split, gap, ratio, &area, &left, &right);
+    if (!ratpoison_plan_geometry(view, node->left, left, axes, resized, resize_ratio, commit) ||
+        !ratpoison_plan_geometry(view, node->right, right, axes, resized, resize_ratio, commit)) return false;
+    if (commit) node->ratio = ratio;
+    return true;
+}
+
+bool view_ratpoison_resize_frame(struct view *view, enum window_node_split axis, float delta)
+{
+    if (view->layout != VIEW_RATPOISON || (axis != SPLIT_X && axis != SPLIT_Y) || !isfinite(delta)) return false;
+    struct window_node *child = view_ratpoison_selected_frame(view);
+    while (child->parent && child->parent->split != axis) child = child->parent;
+    struct window_node *parent = child->parent;
+    if (!parent) return false;
+    float extent = (axis == SPLIT_Y ? parent->area.w : parent->area.h) - window_node_get_gap(view);
+    if (extent <= 0) return false;
+    float ratio = parent->ratio + (child == parent->left ? delta : -delta) / extent;
+    if (!ratpoison_plan_geometry(view, view->root, view->root->area, 0, parent, ratio, false)) return false;
+    ratpoison_plan_geometry(view, view->root, view->root->area, 0, parent, ratio, true);
+    window_node_update(view, view->root);
+    return true;
+}
+
+bool view_ratpoison_equalize_frames(struct view *view, uint32_t axes)
+{
+    if (view->layout != VIEW_RATPOISON || !axes || (axes & ~(SPLIT_X | SPLIT_Y))) return false;
+    if (!ratpoison_plan_geometry(view, view->root, view->root->area, axes, NULL, 0, false)) return false;
+    ratpoison_plan_geometry(view, view->root, view->root->area, axes, NULL, 0, true);
+    window_node_update(view, view->root);
+    return true;
+}

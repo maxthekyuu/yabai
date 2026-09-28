@@ -279,3 +279,85 @@ TEST_FUNC(ratpoison_recall_covered_window,
     TEST_CHECK(view_ratpoison_recall_window(&view, &b), false);
     ratpoison_free_tree(view.root);
 });
+
+TEST_FUNC(ratpoison_resize_and_equalize,
+{
+    struct frame_border_config saved = g_space_manager.frame_border;
+    g_space_manager.frame_border.enabled = true;
+    g_space_manager.frame_border.width = 3;
+    struct view view = ratpoison_test_view();
+    struct window a = { .id = 10 }, b = { .id = 20 };
+    view_add_window_node(&view, &a);
+    view_add_window_node(&view, &b);
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_Y, 40), false);
+    TEST_CHECK(view_ratpoison_split(&view, SPLIT_Y), true);
+    struct window_node *left = view.root->left, *right = view.root->right;
+    view.selected_frame = right; // Empty frame, independent of macOS focus.
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_Y, 100), true);
+    TEST_CHECK((int)right->area.w, 600);
+    TEST_CHECK((int)window_node_content_area(right).w, 594);
+    TEST_CHECK((int)left->area.w, 400);
+    TEST_CHECK(view.selected_frame == right, true);
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_X, 40), false);
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_Y, INFINITY), false);
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_Y, 1000), false);
+    TEST_CHECK((int)right->area.w, 600);
+    TEST_CHECK(view_ratpoison_split(&view, SPLIT_X), true);
+    struct window_node *bottom = right->right;
+    view.selected_frame = bottom;
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_Y, 100), true);
+    TEST_CHECK((int)bottom->area.w, 700);
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_X, -100), true);
+    TEST_CHECK((int)bottom->area.h, 300);
+    TEST_CHECK(view_ratpoison_equalize_frames(&view, SPLIT_Y), true);
+    TEST_CHECK((int)bottom->area.w, 500);
+    TEST_CHECK((int)bottom->area.h, 300);
+    TEST_CHECK(view_ratpoison_equalize_frames(&view, SPLIT_X), true);
+    TEST_CHECK((int)bottom->area.h, 400);
+    TEST_CHECK(view.selected_frame == bottom, true);
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_Y, 494), false); // Six points cannot fit borders + content.
+    TEST_CHECK((int)bottom->area.w, 500);
+    TEST_CHECK(left->window_count, 2);
+    TEST_CHECK(left->window_order[0], b.id);
+    TEST_CHECK(bottom->window_count, 0);
+    view.layout = VIEW_FLOAT;
+    TEST_CHECK(view_ratpoison_equalize_frames(&view, SPLIT_X | SPLIT_Y), false);
+    ratpoison_free_tree(view.root);
+    g_space_manager.frame_border = saved;
+});
+
+TEST_FUNC(ratpoison_equalize_nested_columns,
+{
+    struct view view = ratpoison_test_view();
+    view.window_gap = 10;
+    view_set_flag(&view, VIEW_ENABLE_GAP);
+    view_ratpoison_split(&view, SPLIT_Y);
+    view.selected_frame = view.root->left;
+    view_ratpoison_split(&view, SPLIT_Y);
+    struct window_node *selected = view.selected_frame;
+    TEST_CHECK(view_ratpoison_equalize_frames(&view, SPLIT_Y), true);
+    for (struct window_node *node = window_node_find_first_leaf(view.root); node; node = window_node_find_next_leaf(node)) {
+        TEST_CHECK(abs((int)node->area.w - 326) <= 1, true);
+    }
+    TEST_CHECK(view.selected_frame == selected, true);
+    // Failure in a descendant must not partially change another split.
+    float root_ratio = view.root->ratio, child_ratio = view.root->left->ratio;
+    TEST_CHECK(view_ratpoison_resize_frame(&view, SPLIT_Y, 10000), false);
+    TEST_CHECK(view.root->ratio == root_ratio, true);
+    TEST_CHECK(view.root->left->ratio == child_ratio, true);
+    ratpoison_free_tree(view.root);
+    view = ratpoison_test_view();
+    view.root->area.w = 1000000;
+    for (int i = 0; i < 13; ++i) {
+        TEST_CHECK(view_ratpoison_split(&view, SPLIT_Y), true);
+        view.selected_frame = view_ratpoison_find_frame(&view, view.next_frame_id - 1);
+    }
+    view.root->area.w = 1400;
+    TEST_CHECK(view_ratpoison_equalize_frames(&view, SPLIT_Y), true);
+    TEST_CHECK(view.root->ratio < 0.1f, true);
+    window_node_update(&view, view.root); // Later refresh must preserve small valid ratios.
+    for (struct window_node *node = window_node_find_first_leaf(view.root); node; node = window_node_find_next_leaf(node)) {
+        TEST_CHECK(abs((int)node->area.w - 100) <= 1, true);
+    }
+    ratpoison_free_tree(view.root);
+});
