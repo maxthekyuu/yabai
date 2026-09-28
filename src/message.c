@@ -2200,6 +2200,8 @@ static void handle_domain_window(FILE *rsp, struct token domain, char *message)
 
             if (acting_window) {
                 struct view *view = window_manager_find_managed_window(&g_window_manager, acting_window);
+                if (view && view->sid == space_manager_active_space() &&
+                    view_ratpoison_recall_window(view, acting_window)) view_flush(view);
                 if (view) view_ratpoison_select_window(view, acting_window->id, true);
                 window_manager_focus_window_with_raise(&acting_window->application->psn, acting_window->id, acting_window->ref);
             } else {

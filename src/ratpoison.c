@@ -102,6 +102,17 @@ bool view_ratpoison_move_window(struct view *view, struct window *window, struct
     return true;
 }
 
+// Recall only covered stack members; visible windows keep their existing frame.
+bool view_ratpoison_recall_window(struct view *view, struct window *window)
+{
+    if (view->layout != VIEW_RATPOISON) return false;
+    struct window_node *target = view_ratpoison_selected_frame(view);
+    if (!target || target->window_count) return false;
+    struct window_node *source = view_find_window_node(view, window->id);
+    if (!source || source->window_order[0] == window->id) return false;
+    return view_ratpoison_move_window(view, window, target);
+}
+
 bool view_ratpoison_remove_frame(struct view *view)
 {
     if (view->layout != VIEW_RATPOISON) return false;
