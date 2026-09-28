@@ -318,6 +318,29 @@ destinations('u');
 assert.equal(lastMenu.badges.length, 2);
 assert.deepEqual(Array.from(lastMenu.badges, b => b.key), ['0', '4']);
 press('escape'); idle();
+// A display with many Spaces must not bury the other displays on page one.
+const threeDisplays = [...displays, { id: 503, index: 3, frame: { x: 1400, y: 0, w: 1000, h: 800 } }];
+const lotsOfSpaces = Array.from({ length: 14 }, (_, i) => ({
+    id: 1000 + i, index: i + 1, display: 1, type: 'float', 'is-visible': i === 1
+}));
+const thirdSpace = { id: 1016, index: 16, display: 3, type: 'float', 'is-visible': true };
+const allTargets = [...lotsOfSpaces, { ...remote, index: 15 }, thirdSpace];
+open(); press('m', ['shift']); refresh(); reply(threeDisplays); reply(allTargets);
+assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2, 3]);
+assert.ok(lastMenu.text.includes('S16 (3)'));
+assert.ok(lastMenu.text.split('\n').length <= 22);
+const seen = new Set();
+const pages = Number(lastMenu.text.split('\n')[0].match(/1\/(\d+)/)[1]);
+for (let page = 0; page < pages; ++page) {
+    for (const match of lastMenu.text.matchAll(/S(\d+) \(/g)) seen.add(Number(match[1]));
+    if (page + 1 < pages) press(']');
+}
+assert.deepEqual([...seen].sort((a, b) => a - b), Array.from({ length: 16 }, (_, i) => i + 1));
+press(']'); assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2, 3]);
+press(lastMenu.badges.find(b => b.display === 3).key);
+resolveDestination(allTargets, threeDisplays);
+expectCommand(['window', '10', '--space', '16']);
+press('escape'); reply(null); idle();
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

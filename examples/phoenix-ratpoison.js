@@ -208,22 +208,29 @@ var yabaiRatpoison = (function () {
             var display = entry.space ? entry.space.display : space.display;
             (displays[display] || (displays[display] = [])).push(entry);
         });
-        var pages = [], chunks = [], used = 0, count = 0;
-        function finishPage() {
-            if (chunks.length) pages.push(chunks);
-            chunks = []; used = 0; count = 0;
-        }
-        Object.keys(displays).sort(function (a, b) { return Number(a) - Number(b); }).forEach(function (display) {
-            var items = displays[display], offset = 0;
-            while (offset < items.length) {
-                if (rows + 2 - used < 3 || count === alphabet.length) finishPage();
-                var take = Math.min(items.length - offset, (rows - used) * columns, alphabet.length - count);
+        var pages = [];
+        var displayIds = Object.keys(displays).sort(function (a, b) { return Number(a) - Number(b); });
+        var offsets = {};
+        displayIds.forEach(function (display) { offsets[display] = 0; });
+        var remaining = displayIds.slice();
+        while (remaining.length) {
+            var chunks = [], used = 0, count = 0;
+            remaining.forEach(function (display, index) {
+                var available = rows + 2 - used;
+                if (available < 3 || count === alphabet.length) return;
+                // Reserve a heading, one content row and a bottom border for
+                // other displays before filling this display's remaining rows.
+                var reserve = Math.min(remaining.length - index - 1, Math.floor(available / 3) - 1) * 3;
+                var capacity = (available - reserve - 2) * columns;
+                var offset = offsets[display], items = displays[display];
+                var take = Math.min(items.length - offset, capacity, alphabet.length - count);
                 chunks.push({ display: Number(display), continued: offset > 0, entries: items.slice(offset, offset + take) });
                 used += Math.ceil(take / columns) + 2;
-                count += take; offset += take;
-            }
-        });
-        finishPage();
+                count += take; offsets[display] += take;
+            });
+            pages.push(chunks);
+            remaining = remaining.filter(function (display) { return offsets[display] < displays[display].length; });
+        }
         if (!pages.length) pages.push([]);
         page = (page + pages.length) % pages.length;
         var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages.length, width),

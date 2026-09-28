@@ -113,7 +113,9 @@ nonactivating, click-through panels with no animation or recurring polling.
 Window/frame positions reuse the menu's query results; whole-Space containers
 need one display-geometry query per refresh. At most one page of labels is drawn.
 
-Each display has a labeled box with its own terminal color. Large groups repeat
+Each display has a labeled box with its own terminal color. Pagination reserves room for each display before filling extra rows from a large
+group, so a display with many Spaces does not hide the other displays when they
+fit on the page. Large groups repeat
 their heading with `(continued)` on subsequent pages. Every entry
 starts with `Sx (display number)`. Empty ratpoison frames are selectable directly;
 an empty floating/BSP Space appears as an empty container. Hidden virtual
