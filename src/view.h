@@ -161,6 +161,7 @@ struct window_node
     uint32_t window_order[NODE_MAX_WINDOW_COUNT];
     int window_count;
     unsigned frame_id;
+    float border_width;
     float ratio;
     enum window_node_split split;
     enum window_node_child child;
@@ -202,6 +203,25 @@ enum view_flag
     VIEW_SPLIT_TYPE     = 0x800,
 };
 
+struct frame_border_config
+{
+    bool enabled;
+    int width;
+    struct rgba_color active_color;
+    struct rgba_color inactive_color;
+    struct rgba_color selected_empty_color;
+};
+
+struct frame_border_overlay
+{
+    uint32_t id;
+    CGContextRef context;
+    CGRect frame;
+    uint64_t sid;
+    uint64_t signature;
+    bool visible;
+};
+
 struct view
 {
     CFStringRef uuid;
@@ -210,6 +230,7 @@ struct view
     uint32_t insertion_point;
     struct window_node *selected_frame;
     unsigned next_frame_id;
+    struct frame_border_overlay border;
     enum view_type layout;
     enum window_node_split split_type;
     int top_padding;
@@ -228,6 +249,7 @@ struct view
 void insert_feedback_show(struct window_node *node);
 void insert_feedback_destroy(struct window_node *node);
 
+struct area window_node_content_area(struct window_node *node);
 void window_node_flush(struct window_node *node);
 void window_node_update(struct view *view, struct window_node *node);
 bool window_node_contains_window(struct window_node *node, uint32_t window_id);
@@ -256,6 +278,11 @@ bool view_ratpoison_recall_window(struct view *view, struct window *window);
 bool view_ratpoison_remove_frame(struct view *view);
 bool view_ratpoison_only_frame(struct view *view);
 bool view_ratpoison_move_window(struct view *view, struct window *window, struct window_node *target);
+
+float frame_border_inset(struct view *view, struct area area);
+void frame_border_destroy(struct view *view);
+void frame_border_refresh_all(void);
+void frame_border_reconfigure(void);
 
 void view_serialize(FILE *rsp, struct view *view, uint64_t flags);
 bool view_is_invalid(struct view *view);

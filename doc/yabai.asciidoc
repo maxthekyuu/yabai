@@ -212,6 +212,21 @@ Global Settings
     Easing function to use for window animations. +
     See https://easings.net for details.
 
+*frame_border* ['on'|'off']::
+    Draw native borders around ratpoison frames, including empty frames. Global setting; default on.
+
+*frame_border_width* ['1..64']::
+    Border width in logical points. Default 3. Window placement reserves this width inside each frame.
+
+*active_frame_border_color* ['0xAARRGGBB']::
+    Selected ratpoison frame containing the focused window. Default 0xff55ff55.
+
+*inactive_frame_border_color* ['0xAARRGGBB']::
+    Other ratpoison frames. Default 0xff555555.
+
+*selected_empty_border_color* ['0xAARRGGBB']::
+    Selected empty ratpoison frame. Default 0xff5555ff (blue).
+
 *insert_feedback_color* ['0xAARRGGBB']::
     Color of the *window --insert* message and mouse_drag selection. +
     The purpose is to provide a visual preview of the new window frame.

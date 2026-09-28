@@ -1202,6 +1202,11 @@ void space_manager_handle_display_add(struct space_manager *sm, uint32_t did)
 void space_manager_begin(struct space_manager *sm)
 {
     sm->layout = VIEW_FLOAT;
+    sm->frame_border.enabled = true;
+    sm->frame_border.width = 3;
+    sm->frame_border.active_color = rgba_color_from_hex(0xff55ff55);
+    sm->frame_border.inactive_color = rgba_color_from_hex(0xff555555);
+    sm->frame_border.selected_empty_color = rgba_color_from_hex(0xff5555ff);
     sm->split_ratio = 0.5f;
     sm->auto_balance = SPLIT_NONE;
     sm->split_type = SPLIT_AUTO;

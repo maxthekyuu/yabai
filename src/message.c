@@ -36,6 +36,11 @@ extern bool g_verbose;
 #define COMMAND_CONFIG_MENUBAR_OPACITY       "menubar_opacity"
 #define COMMAND_CONFIG_ACTIVE_WINDOW_OPACITY "active_window_opacity"
 #define COMMAND_CONFIG_NORMAL_WINDOW_OPACITY "normal_window_opacity"
+#define COMMAND_CONFIG_FRAME_BORDER          "frame_border"
+#define COMMAND_CONFIG_FRAME_BORDER_WIDTH    "frame_border_width"
+#define COMMAND_CONFIG_ACTIVE_FRAME_COLOR    "active_frame_border_color"
+#define COMMAND_CONFIG_INACTIVE_FRAME_COLOR  "inactive_frame_border_color"
+#define COMMAND_CONFIG_EMPTY_FRAME_COLOR     "selected_empty_border_color"
 #define COMMAND_CONFIG_INSERT_FEEDBACK_COLOR "insert_feedback_color"
 #define COMMAND_CONFIG_TOP_PADDING           "top_padding"
 #define COMMAND_CONFIG_BOTTOM_PADDING        "bottom_padding"
@@ -1215,6 +1220,38 @@ static struct selector parse_insert_selector(FILE *rsp, char **message)
     return result;
 }
 
+static void handle_frame_border_config(FILE *rsp, struct token command, struct token value)
+{
+    struct frame_border_config *config = &g_space_manager.frame_border;
+    if (token_equals(command, COMMAND_CONFIG_FRAME_BORDER)) {
+        if (!token_is_valid(value)) { fprintf(rsp, "%s\n", bool_str[config->enabled]); return; }
+        if (token_equals(value, "on")) config->enabled = true;
+        else if (token_equals(value, "off")) config->enabled = false;
+        else { daemon_fail(rsp, "frame_border expects on or off.\n"); return; }
+        frame_border_reconfigure();
+    } else if (token_equals(command, COMMAND_CONFIG_FRAME_BORDER_WIDTH)) {
+        if (!token_is_valid(value)) { fprintf(rsp, "%d\n", config->width); return; }
+        int width;
+        if (value.length > 2 || !token_is_positive_integer(value, &width) || width < 1 || width > 64) {
+            daemon_fail(rsp, "frame_border_width expects an integer between 1 and 64 points.\n");
+            return;
+        }
+        config->width = width;
+        frame_border_reconfigure();
+    } else {
+        struct rgba_color *color = token_equals(command, COMMAND_CONFIG_ACTIVE_FRAME_COLOR) ? &config->active_color
+                                 : token_equals(command, COMMAND_CONFIG_INACTIVE_FRAME_COLOR) ? &config->inactive_color
+                                 : &config->selected_empty_color;
+        if (!token_is_valid(value)) { fprintf(rsp, "0x%08x\n", color->p); return; }
+        uint32_t hex;
+        if (value.length != 10 || !token_is_hexadecimal(value, &hex)) {
+            daemon_fail(rsp, "frame border colors expect 0xAARRGGBB.\n");
+            return;
+        }
+        *color = rgba_color_from_hex(hex);
+    }
+}
+
 static void handle_domain_config(FILE *rsp, struct token domain, char *message)
 {
     TIME_FUNCTION;
@@ -1433,6 +1470,16 @@ static void handle_domain_config(FILE *rsp, struct token domain, char *message)
             } else {
                 daemon_fail(rsp, "unknown value '%.*s' given to command '%.*s' for domain '%.*s'\n", value.token.length, value.token.text, command.length, command.text, domain.length, domain.text);
             }
+        } else if (token_equals(command, COMMAND_CONFIG_FRAME_BORDER) ||
+                   token_equals(command, COMMAND_CONFIG_FRAME_BORDER_WIDTH) ||
+                   token_equals(command, COMMAND_CONFIG_ACTIVE_FRAME_COLOR) ||
+                   token_equals(command, COMMAND_CONFIG_INACTIVE_FRAME_COLOR) ||
+                   token_equals(command, COMMAND_CONFIG_EMPTY_FRAME_COLOR)) {
+            if (sel_sid) {
+                daemon_fail(rsp, "frame border settings are global; omit --space.\n");
+                return;
+            }
+            handle_frame_border_config(rsp, command, get_token(&message));
         } else if (token_equals(command, COMMAND_CONFIG_INSERT_FEEDBACK_COLOR)) {
             struct token_value value = token_to_value(get_token(&message));
             if (value.type == TOKEN_TYPE_INVALID) {

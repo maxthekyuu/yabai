@@ -62,7 +62,10 @@ bool view_ratpoison_split(struct view *view, enum window_node_split split)
     float ratio = g_space_manager.split_ratio;
     if (!in_range_ii(ratio, 0.1f, 0.9f)) ratio = 0.5f;
     float available = extent - window_node_get_gap(view);
-    if (available * ratio < 1 || available * (1 - ratio) < 1 || view->next_frame_id == UINT_MAX) return false;
+    float minimum = g_space_manager.frame_border.enabled ? 2 * g_space_manager.frame_border.width + 1 : 1;
+    float perpendicular = split == SPLIT_Y ? node->area.h : node->area.w;
+    if (available * ratio < minimum || available * (1 - ratio) < minimum ||
+        perpendicular < minimum || view->next_frame_id == UINT_MAX) return false;
 
     struct window_node *left = calloc(1, sizeof(struct window_node));
     struct window_node *right = calloc(1, sizeof(struct window_node));
@@ -166,6 +169,7 @@ bool view_ratpoison_only_frame(struct view *view)
     if (view->root->left) ratpoison_free_tree(view->root->left);
     if (view->root->right) ratpoison_free_tree(view->root->right);
     *view->root = merged;
+    window_node_update(view, view->root);
     view->selected_frame = view->root;
     return true;
 }

@@ -14,6 +14,7 @@ struct space_manager
     uint64_t last_space_id;
     bool did_begin;
     enum view_type layout;
+    struct frame_border_config frame_border;
     int top_padding;
     int bottom_padding;
     int left_padding;

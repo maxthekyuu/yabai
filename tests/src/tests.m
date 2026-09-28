@@ -13,6 +13,7 @@ typedef TEST_SIG(function);
 
 #include "area.c"
 #include "ratpoison.c"
+#include "frame_border.c"
 
 #define TEST_ENTRY(name) { #name, test_##name },
 #define TEST_LIST                                              \
@@ -25,7 +26,9 @@ typedef TEST_SIG(function);
     TEST_ENTRY(ratpoison_window_list_capacity)                  \
     TEST_ENTRY(ratpoison_nested_removal)                        \
     TEST_ENTRY(ratpoison_directional_frames)                    \
-    TEST_ENTRY(ratpoison_recall_covered_window)
+    TEST_ENTRY(ratpoison_recall_covered_window)                  \
+    TEST_ENTRY(frame_border_geometry_and_rendering)             \
+    TEST_ENTRY(frame_border_config_validation)
 
 static struct {
     char *name;

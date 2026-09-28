@@ -46,6 +46,31 @@ regions. `auto_balance` does not rearrange frames on window arrival or departure
 Use the existing window ratio/resize commands to adjust splits. BSP insertion,
 warp, swap, zoom, and mouse-drop tree editing remain restricted to BSP.
 
+## Frame borders
+
+Native borders outline every ratpoison frame, including empty frames. They are
+on by default. Add these global settings to yabairc to customize them:
+
+```sh
+yabai -m config frame_border on
+yabai -m config frame_border_width 3
+yabai -m config active_frame_border_color 0xff55ff55
+yabai -m config inactive_frame_border_color 0xff555555
+yabai -m config selected_empty_border_color 0xff5555ff
+```
+
+Colors use `0xAARRGGBB`. The selected empty frame is blue; the selected frame
+containing the focused window is green; other frames are gray. Width is 1–64
+logical points. Windows are inset by the border width on every side, including
+when `window_gap` is zero. Turning borders off restores the full frame area.
+Very small existing frames clamp the width to preserve at least one content
+point; new splits must have room for both borders and content.
+
+Borders follow Spaces and disappear in Mission Control and other layouts.
+Frame queries include the outer `frame`, inset `content` rectangle, and effective
+`border-width`. External window-border tools are unnecessary for ratpoison
+frames and may draw additional borders if left running.
+
 ## Phoenix: Super-S prefix
 
 Phoenix supports temporary key handlers, so no skhd migration is required.

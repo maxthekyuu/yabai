@@ -1829,7 +1829,7 @@ enum window_op_error window_manager_stack_window(struct space_manager *sm, struc
     window_manager_adjust_layer(b, LAYER_BELOW);
     scripting_addition_order_window(b->id, 1, a_node->window_order[1]);
 
-    struct area area = a_node->zoom ? a_node->zoom->area : a_node->area;
+    struct area area = window_node_content_area(a_node);
     window_manager_animate_window((struct window_capture) { b, area.x, area.y, area.w, area.h });
     return WINDOW_OP_ERROR_SUCCESS;
 }
