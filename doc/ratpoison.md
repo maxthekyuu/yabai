@@ -4,7 +4,11 @@ Ratpoison is a manual layout: windows share persistent frames, and only explicit
 commands split or remove frames. Closing, hiding, minimizing, or floating a window
 leaves its frame in place. New windows stack in the selected frame. Selecting an
 empty frame sets the destination for the next window; macOS focus stays on the
-previous window until an occupied frame/window is selected.
+previous window until an occupied frame/window is selected. With an empty frame
+selected, choosing a covered window from another frame's stack (through the
+prefix menu or `window --focus`) moves it into the empty frame. Choosing an
+already visible window focuses its existing frame. This recall applies within
+the active Space; minimized, hidden, and other-Space windows are not recalled.
 
 ```sh
 yabai -m space --layout ratpoison

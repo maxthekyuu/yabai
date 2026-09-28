@@ -252,3 +252,30 @@ TEST_FUNC(ratpoison_directional_frames,
     TEST_CHECK(view_ratpoison_frame_in_direction(&view, DIR_EAST) == NULL, true);
     ratpoison_free_tree(view.root);
 });
+
+TEST_FUNC(ratpoison_recall_covered_window,
+{
+    struct view view = ratpoison_test_view();
+    struct window a = { .id = 10 }, b = { .id = 20 }, absent = { .id = 99 };
+    view_add_window_node(&view, &a);
+    view_add_window_node(&view, &b);
+    view_ratpoison_split(&view, SPLIT_Y);
+    struct window_node *source = view.root->left, *target = view.root->right;
+    view.selected_frame = target;
+    TEST_CHECK(source->window_order[0], b.id);
+    TEST_CHECK(view_ratpoison_recall_window(&view, &b), false);
+    TEST_CHECK(view_ratpoison_recall_window(&view, &absent), false);
+    TEST_CHECK(view.selected_frame == target, true);
+    TEST_CHECK(view_ratpoison_recall_window(&view, &a), true);
+    TEST_CHECK(source->window_count, 1);
+    TEST_CHECK(source->window_order[0], b.id);
+    TEST_CHECK(target->window_count, 1);
+    TEST_CHECK(target->window_order[0], a.id);
+    TEST_CHECK(view.selected_frame == target, true);
+    TEST_CHECK(view_ratpoison_recall_window(&view, &b), false);
+    view_ratpoison_move_window(&view, &a, source);
+    view.selected_frame = target;
+    view.layout = VIEW_BSP;
+    TEST_CHECK(view_ratpoison_recall_window(&view, &b), false);
+    ratpoison_free_tree(view.root);
+});
