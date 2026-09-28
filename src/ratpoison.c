@@ -226,6 +226,20 @@ bool view_ratpoison_resize_frame(struct view *view, enum window_node_split axis,
     return true;
 }
 
+// Ratios always describe left:right (or top:bottom), independent of selection.
+bool view_ratpoison_set_frame_ratio(struct view *view, enum window_node_split axis, float ratio)
+{
+    if (view->layout != VIEW_RATPOISON || (axis != SPLIT_X && axis != SPLIT_Y) ||
+        !isfinite(ratio) || ratio <= 0 || ratio >= 1) return false;
+    struct window_node *child = view_ratpoison_selected_frame(view);
+    while (child->parent && child->parent->split != axis) child = child->parent;
+    struct window_node *parent = child->parent;
+    if (!parent || !ratpoison_plan_geometry(view, view->root, view->root->area, 0, parent, ratio, false)) return false;
+    ratpoison_plan_geometry(view, view->root, view->root->area, 0, parent, ratio, true);
+    window_node_update(view, view->root);
+    return true;
+}
+
 bool view_ratpoison_equalize_frames(struct view *view, uint32_t axes)
 {
     if (view->layout != VIEW_RATPOISON || !axes || (axes & ~(SPLIT_X | SPLIT_Y))) return false;

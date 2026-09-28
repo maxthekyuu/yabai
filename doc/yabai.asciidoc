@@ -374,6 +374,9 @@ COMMAND
 *--resize-frame* 'horizontal:<points>|vertical:<points>'::
     Resize the selected ratpoison frame, including an empty frame. Positive points grow width (horizontal) or height (vertical); negative points shrink it. Moves the nearest divider on that axis. Rejects changes that cannot fit all frame borders and content.
 
+*--frame-ratio* 'horizontal:<left>:<right>|vertical:<top>:<bottom>'::
+    Set the selected ratpoison frame's nearest split on the chosen axis to positive numeric weights. For example horizontal:1:2 gives the left side one third and the right side two thirds of the available width after the gap. Ordering is independent of selection. Rejects ratios that cannot fit frame borders and content.
+
 *--equalize-frames* 'horizontal|vertical|both'::
     Equalize ratpoison frame widths, heights, or both within the existing tree, accounting for gaps. Preserves frame ids, selection, and window stacks.
 

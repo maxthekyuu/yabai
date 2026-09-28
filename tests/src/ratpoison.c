@@ -361,3 +361,41 @@ TEST_FUNC(ratpoison_equalize_nested_columns,
     }
     ratpoison_free_tree(view.root);
 });
+
+TEST_FUNC(ratpoison_fixed_frame_ratios,
+{
+    struct view view = ratpoison_test_view();
+    view.window_gap = 10;
+    view_set_flag(&view, VIEW_ENABLE_GAP);
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, 1.0f/3), false);
+    view_ratpoison_split(&view, SPLIT_Y);
+    struct window_node *left = view.root->left, *right = view.root->right;
+    for (int side = 0; side < 2; ++side) {
+        view.selected_frame = side ? right : left;
+        TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, 1.0f/3), true);
+        TEST_CHECK((int)left->area.w, 330);
+        TEST_CHECK(abs((int)right->area.w - 660) <= 1, true);
+        TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, 2.0f/3), true);
+        TEST_CHECK((int)left->area.w, 660);
+        TEST_CHECK(abs((int)right->area.w - 330) <= 1, true);
+        TEST_CHECK(view.selected_frame == (side ? right : left), true);
+    }
+    float saved = view.root->ratio;
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, NAN), false);
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, 1), false);
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, 0), false);
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_X, 0.5f), false);
+    TEST_CHECK(view.root->ratio == saved, true);
+    view_ratpoison_split(&view, SPLIT_X); // Selected right frame, then top child.
+    struct window_node *selected = view.selected_frame;
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, 1.0f/3), true);
+    TEST_CHECK((int)left->area.w, 330);
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_X, 2.0f/3), true);
+    TEST_CHECK(abs((int)selected->area.h - 526) <= 1, true);
+    TEST_CHECK(view.selected_frame == selected, true);
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, 0.99999f), false);
+    TEST_CHECK((int)left->area.w, 330);
+    view.layout = VIEW_BSP;
+    TEST_CHECK(view_ratpoison_set_frame_ratio(&view, SPLIT_Y, 0.5f), false);
+    ratpoison_free_tree(view.root);
+});

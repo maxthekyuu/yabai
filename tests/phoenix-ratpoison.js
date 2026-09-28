@@ -381,6 +381,13 @@ for (const [key, axis] of [['h','horizontal'],['v','vertical'],['b','both']]) {
     reply(null); refresh(); press('escape'); idle();
 }
 open(); press('e', ['shift']); press('escape'); refresh(); press('escape'); idle();
+// Fixed ratios describe left:right regardless of the selected side; numbers
+// in the sizes submenu do not trigger the main menu's layout shortcuts.
+for (const [key, ratio] of [['1','1:2'],['2','1:1'],['3','2:1']]) {
+    open(space, []); press('e', ['shift']); press(key);
+    expectCommand(['space','2','--frame-ratio','horizontal:' + ratio]);
+    reply(null); refresh(); press('escape'); idle();
+}
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

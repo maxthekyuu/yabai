@@ -75,8 +75,25 @@ minimum window sizes.
 
 Within the prefix menu, **Shift-H/L** shrinks/grows width by 40 points and
 **Shift-K/J** shrinks/grows height by 40 points. **Shift-E** opens equalization:
-`h` for equal widths, `v` for equal heights, `b` for both; Escape returns to the
-chooser. These controls refresh the menu and centered labels after each change.
+`h` for equal widths, `v` for equal heights, `b` for both. The same size menu
+has left:right width presets: `1` = **1:2**, `2` = **1:1**, `3` = **2:1**.
+Escape returns to the chooser. These numbers select ratios only inside the size
+menu; the main menu still uses them for layouts. These controls refresh the menu and centered labels after each change.
+
+Fixed ratios also work through the CLI:
+
+```sh
+yabai -m space --frame-ratio horizontal:1:2 # left third, right two-thirds
+yabai -m space --frame-ratio horizontal:2:1 # left two-thirds, right third
+yabai -m space --frame-ratio horizontal:1:1 # equal left/right split
+yabai -m space --frame-ratio vertical:1:2   # top third, bottom two-thirds
+```
+
+Ratios divide the space remaining after the gap, and always mean left:right
+(horizontal) or top:bottom (vertical), regardless of which side is selected.
+With more than two frames, they apply to the selected frame's nearest divider
+on that axis; sibling subtrees resize with it. Positive numeric weights are
+supported. Border/content minimums still apply, with invalid changes rejected.
 
 ## Frame borders
 
