@@ -11,6 +11,7 @@ var yabaiRatpoison = (function () {
     var rendererTask = null;
     var rendererGeneration = 0;
     var active = false;
+    var searching = false;
     var generation = 0;
     var queuedDirection = null;
 
@@ -21,6 +22,7 @@ var yabaiRatpoison = (function () {
 
     function cancel() {
         active = false;
+        searching = false;
         queuedDirection = null;
         generation += 1;
         clearKeys();
@@ -37,15 +39,25 @@ var yabaiRatpoison = (function () {
         modal = null;
     }
 
-    function show(text, duration, groups, badges) {
+    function show(text, duration, groups, badges, search, onSelect) {
         closeMenu();
         var current = rendererGeneration;
         // env execs the helper without a shell. A missing helper then produces
         // exit 127 and a callback; Phoenix otherwise only logs launch failures.
-        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], badges: badges || [], screen: Screen.main().visibleFrame() })], function (task) {
+        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search, screen: Screen.main().visibleFrame() })], function (task) {
             if (current !== rendererGeneration) return;
             rendererTask = null;
-            if (task.status === 0) { cancel(); return; }
+            if (task.status === 0) {
+                if (onSelect && active && task.output) {
+                    var result;
+                    try { result = JSON.parse(task.output); } catch (_) {}
+                    if (result && Number.isInteger(result.selection) && result.selection >= 0 && result.selection < search.length) {
+                        searching = false;
+                        onSelect(result.selection); return;
+                    }
+                }
+                cancel(); return;
+            }
             // Report a missing renderer/font through Phoenix rather than
             // leaving invisible bindings enabled. This is an error fallback.
             cancel();
@@ -200,6 +212,48 @@ var yabaiRatpoison = (function () {
         return { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
     }
 
+    function searchWindows(choose, currentSpace) {
+        searching = true;
+        var current = ++generation;
+        clearKeys();
+        bind('escape', [], cancel);
+        // Snapshot every Space and window once. Typing never re-queries yabai.
+        run(['query', '--spaces'], function (spaceTask) {
+            if (!active || generation !== current) return;
+            var spaces;
+            try { spaces = JSON.parse(spaceTask.output); } catch (_) {}
+            if (spaceTask.status !== 0 || !Array.isArray(spaces)) { error('search Space query failed'); return; }
+            run(['query', '--windows'], function (windowTask) {
+                if (!active || generation !== current) return;
+                var windows;
+                try { windows = JSON.parse(windowTask.output); } catch (_) {}
+                if (windowTask.status !== 0 || !Array.isArray(windows)) { error('search window query failed'); return; }
+                var results = [];
+                windows.forEach(function (window) {
+                    var space = spaces.filter(function (item) { return item.index === window.space; })[0];
+                    if (!space) return;
+                    var text = clean(window.app + ': ' + window.title);
+                    var owner = (space.frames || []).filter(function (frame) { return frame.windows.indexOf(window.id) !== -1; })[0];
+                    var rect = space['is-visible'] && !window['is-minimized'] && !window['is-hidden']
+                             ? (owner ? frameRect(owner) : window.frame) : undefined;
+                    results.push({ window: window.id, space: space, rect: rect, text: text, pid: window.pid,
+                        minimized: window['is-minimized'], hidden: window['is-hidden'], searchable: true,
+                        label: 'S' + space.index + ' (' + space.display + ') ' + text +
+                               (window['is-minimized'] ? ' [minimized]' : window['is-hidden'] ? ' [hidden]' : '') });
+                });
+                var search = results.map(function (entry, index) {
+                    return { index: index, label: entry.label, text: entry.text, display: entry.space.display,
+                             rect: entry.rect, pid: entry.pid, hidden: entry.hidden };
+                });
+                show('Window search', null, [], [], search, function (index) {
+                    var entry = results[index];
+                    if (entry.space.id === currentSpace.id && !entry.minimized && !entry.hidden) choose(entry);
+                    else visit(entry, null);
+                });
+            });
+        });
+    }
+
     function choices(entries, title, space, windows, choose, page) {
         clearKeys();
         controls(space, windows);
@@ -270,7 +324,7 @@ var yabaiRatpoison = (function () {
         if (!hint) lines.push('(no choices)');
         lines.push('Page ' + (page + 1) + '/' + pages.length + ' | ' + hint + '/' + entries.length +
                    ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
-        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-D/U screens');
+        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-D/U screens');
         if (space.type === 'ratpoison') {
             lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next',
                        'Shift-H/L width   Shift-K/J height   Shift-E sizes');
@@ -283,6 +337,7 @@ var yabaiRatpoison = (function () {
         bind('pageDown', [], nextPage);
         bind('space', [], nextPage);
         bind('space', ['shift'], previousPage);
+        if (title === 'visible windows / frames') bind('/', [], function () { searchWindows(choose, space); });
         show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges);
     }
 
@@ -375,7 +430,7 @@ var yabaiRatpoison = (function () {
                                                        : item.id === entry.space.id;
                 })[0];
                 if (!target || (entry.visibleOnly && !target['is-visible']) ||
-                    (target['is-native-fullscreen'] && !entry.visibleOnly)) { error('destination is no longer available'); return; }
+                    (target['is-native-fullscreen'] && !entry.visibleOnly && !entry.searchable)) { error('destination is no longer available'); return; }
                 function focusWindow() {
                     if (source) request(['window', '--focus', String(source.id)], function () { load('windows'); });
                     else if (entry.window !== undefined) {
@@ -391,8 +446,17 @@ var yabaiRatpoison = (function () {
                             var owner = target.type === 'ratpoison' && (target.frames || []).filter(function (frame) {
                                 return frame.windows.indexOf(entry.window) !== -1;
                             })[0];
-                            if (owner) request(['space', String(target.index), '--focus-frame', String(owner.id)], selectWindow);
-                            else selectWindow();
+                            function restoreFocus() {
+                                if (owner) request(['space', String(target.index), '--focus-frame', String(owner.id)], selectWindow);
+                                else selectWindow();
+                            }
+                            if (window['is-minimized']) {
+                                request(['window', '--deminimize', String(entry.window)], function () {
+                                    waitFor(['query', '--windows', '--window', String(entry.window)], function (item) {
+                                        return item && !item['is-minimized'];
+                                    }, restoreFocus, 30);
+                                });
+                            } else restoreFocus();
                         });
                     } else if (entry.frame !== undefined) {
                         request(['space', String(target.index), '--focus-frame', String(entry.frame)], function () { load('windows'); });
@@ -572,6 +636,6 @@ var yabaiRatpoison = (function () {
     }
 
     Key.on('s', ['cmd'], function (_, repeated) { if (!repeated) start(); });
-    Event.on('mouseDidLeftClick', cancel);
+    Event.on('mouseDidLeftClick', function () { if (!searching) cancel(); });
     return { cancel: cancel, start: start };
 }());

@@ -388,6 +388,43 @@ for (const [key, ratio] of [['1','1:2'],['2','1:1'],['3','2:1']]) {
     expectCommand(['space','2','--frame-ratio','horizontal:' + ratio]);
     reply(null); refresh(); press('escape'); idle();
 }
+// Search sends the complete window snapshot (including later pages), and text
+// entry stays native: no window hint or layout keys intercept the query.
+open(badgeSpace); press('/'); reply([badgeSpace]); reply(windows.map(w => ({...w, space: 2})));
+assert.equal(lastMenu.search.length, 2); // Empty frame is not a window match.
+assert.equal(lastMenu.search[0].text, 'Terminal: One');
+assert.equal(keys.size, 2); // Only global prefix and Escape remain in Phoenix.
+assert.equal(tasks.length, 0);
+const [searchId, searchCallback] = [...renderers.entries()][0];
+renderers.delete(searchId); searchCallback({status:0, output:JSON.stringify({selection:1})});
+expectCommand(['window','--focus','20']); reply(null); idle();
+open({ ...space, type:'float' }, withRects); press('/'); reply([space]); reply(withRects.map(w => ({...w, space: 2})));
+assert.equal(lastMenu.search.length, 80);
+const [cancelSearchId, cancelSearch] = [...renderers.entries()][0];
+press('escape'); cancelSearch({status:0,output:'{"selection":0}'});
+assert.equal(tasks.length, 0); idle();
+// Malformed/out-of-range native selections never execute a window command.
+open(); press('/'); reply([space]); reply(windows.map(w => ({...w, space:2}))); const [invalidSearchId, invalidSearch] = [...renderers.entries()][0];
+renderers.delete(invalidSearchId); invalidSearch({status:0,output:'{"selection":999}'});
+assert.equal(tasks.length,0); idle();
+// Search spans hidden desktops and includes minimized windows, without adding
+// their stale coordinates as on-screen badges. Selecting restores and follows.
+open(); press('/'); expectCommand(['query','--spaces']); reply(desktops);
+expectCommand(['query','--windows']); reply([
+    {...windows[0], space:2},
+    {id:99,space:4,app:'Editor',title:'Hidden desktop',frame:{x:0,y:0,w:500,h:400},'is-minimized':true},
+    {id:100,space:3,app:'Browser',title:'Other screen',frame:{x:-800,y:0,w:500,h:400}}
+]);
+assert.equal(lastMenu.search.length,3);
+assert.equal(lastMenu.search[1].rect,undefined);
+assert.ok(lastMenu.search[1].label.includes('S4 (2)'));
+const [globalSearchId, globalSearch] = [...renderers.entries()][0]; renderers.delete(globalSearchId);
+globalSearch({status:0,output:'{"selection":1}'});
+reply(desktops); reply(space); expectCommand(['space','--focus','4']); reply(null); reply(desktop);
+expectCommand(['query','--windows','--window','99']); reply({id:99,space:4,'is-minimized':true});
+expectCommand(['window','--deminimize','99']); reply(null); reply({id:99,space:4,'is-minimized':false});
+expectCommand(['window','--focus','99']); reply(null); refresh(desktop); press('escape'); idle();
+open(); press('/'); press('escape'); reply(desktops); assert.equal(tasks.length,0); idle();
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

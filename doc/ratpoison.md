@@ -173,6 +173,28 @@ work in floating and BSP as well; the menu continues to list their windows.
 Floating-mode directional navigation chooses the nearest window centre in that
 direction; BSP uses yabai's existing managed-window navigation.
 
+### Search windows
+
+Press `/` in the main chooser to search all windows across **every Space and physical display**, including hidden
+desktops, minimized windows, and hidden applications. Search takes a fresh global
+snapshot when opened, including entries beyond the main menu’s pages. Type an application name or window
+title; matches narrow immediately. Matching ignores case and accents, and each
+space-separated search term must match. Clear the text to restore all windows.
+Empty frames and containers are omitted from window search.
+
+Display boxes, `Sx (display)` labels, and centered selection hints remain visible
+for matching windows on visible Spaces. Hidden/minimized windows have no on-screen
+label until restored; selecting them switches Space and restores focus. Up/Down selects a result and Enter focuses it. Page Up/Down
+moves between result pages. Tab switches between typing and label selection;
+in label mode, press a displayed key to focus its window. Escape closes search.
+Normal layout and frame command shortcuts are suspended while typing.
+
+Search uses a native text field, including Unicode and normal text editing.
+Filtering uses the existing snapshot in a single renderer process; it neither
+queries yabai nor launches processes as you type, and it reuses hint panels.
+Reopen the chooser to refresh windows that opened or changed after the snapshot.
+Search does not change the existing local recall or cross-display focus behavior.
+
 ### Displays and virtual desktops
 
 The main `Super-S` chooser lists windows and frames on **all currently visible
