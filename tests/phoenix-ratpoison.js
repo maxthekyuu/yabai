@@ -461,6 +461,17 @@ for (const frames of [moveTargetSpace.frames.filter(f=>f.id!==3),
 openRemoteMove(); reply(moveSpaces); reply(space); reply(null); reply(moveTargetSpace);
 expectCommand(['space','3','--focus-frame','3']); press('escape'); reply(null);
 assert.equal(tasks.length,0); idle();
+// Temporary fullscreen addresses the selected frame's front window and closes
+// the menu. Repeating sends the same native toggle; no layout mutation occurs.
+for (let i = 0; i < 2; ++i) {
+    open(); press('z', ['shift']);
+    expectCommand(['window', '10', '--toggle', 'windowed-fullscreen']);
+    reply(null); idle();
+}
+open({...space, frames: space.frames.map(f => ({...f, selected: f.id === 7}))});
+press('z', ['shift']); assert.equal(tasks.length, 0); press('escape'); idle();
+open({...space, type: 'float'}); press('z', ['shift']);
+expectCommand(['window', '10', '--toggle', 'windowed-fullscreen']); reply(null); idle();
 // Shift-W removes; Shift-R never accidentally removes a frame.
 open(); press('w',['shift']); expectCommand(['space','2','--remove-frame']); reply(null); refresh(); press('escape'); idle();
 const stacked = {...space,frames:[{...space.frames[0],windows:[10,20,30],'active-window':10}]};

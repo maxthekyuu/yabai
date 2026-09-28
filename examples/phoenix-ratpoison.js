@@ -196,6 +196,17 @@ var yabaiRatpoison = (function () {
         bind('d', ['shift'], function () { load('displays'); });
         bind('u', ['shift'], function () { load('spaces'); });
         bind('f', ['shift'], function () { load('frames'); });
+        bind('z', ['shift'], function () {
+            // Keep the frame tree intact: yabai saves/restores this window's
+            // rectangle without floating it or entering a native fullscreen Space.
+            var focused = windows.filter(function (window) { return window['has-focus']; })[0];
+            if (space.type === 'ratpoison') {
+                var selected = (space.frames || []).filter(function (frame) { return frame.selected; })[0];
+                if (!selected || !selected.windows.length) return;
+                focused = { id: selected['active-window'] };
+            }
+            if (focused && focused.id) command(['window', String(focused.id), '--toggle', 'windowed-fullscreen']);
+        });
         if (space.type !== 'ratpoison') return;
         var args = ['space', String(space.index)];
         [['h', 'horizontal:-40'], ['l', 'horizontal:40']].forEach(function (entry) {
@@ -354,7 +365,7 @@ var yabaiRatpoison = (function () {
                    ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
         lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-D/U screens');
         if (space.type === 'ratpoison') {
-            lines.push('Shift-S/V split   Shift-F frames', 'Shift-W remove    Shift-O only     Tab next',
+            lines.push('Shift-S/V split   Shift-F frames', 'Shift-W remove    Shift-O only     Shift-Z fullscreen',
                        'Shift-R resize   Shift-J/K stack   Shift-E sizes');
         }
         function previousPage() { choices(entries, title, space, windows, choose, page - 1); }

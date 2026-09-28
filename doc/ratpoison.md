@@ -162,6 +162,7 @@ Press **Super-S (Command-S)**, release it, then choose:
 | `Tab` / `Shift-Tab` | Next / previous frame |
 | `Shift-R` | Resize selected frame with arrows/hjkl; Escape returns |
 | `Shift-W` | Remove selected frame |
+| `Shift-Z` | Toggle temporary fullscreen for the selected frame’s front window |
 | `Shift-J` / `Shift-K` | Next / previous window in the selected frame’s stack |
 | `Shift-O` | Keep only selected frame, collecting its windows |
 | `Shift-T` | Toggle ratpoison; leaving it always chooses floating |
@@ -176,6 +177,20 @@ the menu. Choosing the already-active mode leaves its layout intact. Mode keys
 work in floating and BSP as well; the menu continues to list their windows.
 Floating-mode directional navigation chooses the nearest window centre in that
 direction; BSP uses yabai's existing managed-window navigation.
+
+### Temporary fullscreen
+
+Press **Super-S, Shift-Z** to expand the selected frame's front window across
+its display. Repeat the shortcut on that window to restore its saved size and
+position. The menu closes after the toggle. Empty selected frames do nothing.
+This uses `yabai -m window <id> --toggle windowed-fullscreen`, which leaves the
+ratpoison tree, split ratios, stacks, and empty frames intact; it does not create
+a macOS fullscreen Space. The same shortcut works on focused floating and BSP
+windows. Display constraints such as the menu bar and Dock still apply.
+
+The saved rectangle is temporary: manually moving/resizing the window or
+changing the layout while expanded can supersede it. Restore before editing the
+layout when you want to return to the exact previous arrangement.
 
 ### Appearance configuration
 
