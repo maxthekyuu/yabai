@@ -15,11 +15,11 @@ OUTPUT = ROOT / 'tests/bin'
 
 
 class PrefixMenuTests(unittest.TestCase):
-    def render(self, name, text, screen):
+    def render(self, name, text, screen, groups=None, badges=None):
         OUTPUT.mkdir(exist_ok=True)
         path = OUTPUT / name
         result = subprocess.run(
-            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen})],
+            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen, 'groups': groups or [], 'badges': badges or []})],
             capture_output=True, text=True, check=True,
         )
         metrics = json.loads(result.stdout)
@@ -68,8 +68,47 @@ class PrefixMenuTests(unittest.TestCase):
         self.render('prefix-small.png', 'YABAI  ratpoison\n1 ratpoison  2 floating  3 bsp\n\n0 * F1 [empty]\nEsc close',
                     {'x': -800, 'y': 200, 'width': 800, 'height': 500})
 
+    def test_display_groups(self):
+        text = '\n'.join([
+            'YABAI  ratpoison  |  visible windows / frames  |  1/1',
+            '1 ratpoison   2 floating   3 bsp', '',
+            '┌ Display 1 ──────────────────────────────────────────┐',
+            '│ 0 S1 (1) * F0 Terminal: build                        │',
+            '│ 4 S1 (1)   F1 [empty]                               │',
+            '└─────────────────────────────────────────────────────┘',
+            '┌ Display 2 ──────────────────────────────────────────┐',
+            '│ 5 S3 (2)   Browser: Project docs                     │',
+            '│ 6 S3 (2)   Editor: notes                             │',
+            '└─────────────────────────────────────────────────────┘', '',
+            'arrows/hjkl focus   [ ] page   Esc close',
+        ])
+        text = '\n'.join(line[:-1].ljust(54) + '│' if line.startswith('│') else line for line in text.split('\n'))
+        self.render('prefix-groups.png', text, {'x': 0, 'y': 0, 'width': 1440, 'height': 900},
+                    [{'start': 3, 'end': 6, 'display': 1}, {'start': 7, 'end': 10, 'display': 2}])
+
+    def test_hint_coordinates_and_stacks(self):
+        badges = [
+            {'key': '0', 'display': 1, 'rect': {'x': 0, 'y': 0, 'w': 200, 'h': 100}},
+            {'key': '4', 'display': 1, 'rect': {'x': 0, 'y': 0, 'w': 200, 'h': 100}},
+            {'key': '5', 'display': 2, 'rect': {'x': -1000, 'y': -300, 'w': 400, 'h': 200}},
+        ]
+        metrics = self.render('prefix-hints.png', 'YABAI\n0 4 5',
+                              {'x': 0, 'y': 0, 'width': 1440, 'height': 900}, badges=badges)
+        first, second = metrics['badges']
+        self.assertEqual(first['keys'], '0 4')
+        self.assertEqual(first['cx'], 100)
+        self.assertEqual(second['cx'], -800)
+        self.assertEqual(second['cy'] - first['cy'], 250)
+        self.assertEqual(first['x'] + first['width'] / 2, first['cx'])
+        self.assertEqual(first['y'] + first['height'] / 2, first['cy'])
+        self.assertTrue((OUTPUT / 'prefix-hints.png.hint.png').exists())
+        self.assertLess(first['width'], 100)
+        self.assertLess(first['height'], 40)
+
     def test_invalid_payload(self):
-        for value in ['not json', '{}', '[]', json.dumps({'text': 123}),
+        for value in [json.dumps({'text': 'test', 'badges': [{'key': '0', 'rect': {}}]}),
+                      json.dumps({'text': 'test', 'badges': [None] * 33}), 'not json', '{}', '[]', json.dumps({'text': 123}), json.dumps({'text': 'test', 'groups': [1]}),
+                      json.dumps({'text': 'test', 'groups': [{'start': 0, 'end': 5, 'display': 1}]}),
                       json.dumps({'text': 'test', 'screen': {'x': 0, 'y': 0, 'width': 'bad', 'height': 800}})]:
             result = subprocess.run([str(BINARY), '--snapshot', str(OUTPUT / 'invalid.png'), value], capture_output=True)
             self.assertNotEqual(result.returncode, 0)

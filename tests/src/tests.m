@@ -24,7 +24,8 @@ typedef TEST_SIG(function);
     TEST_ENTRY(ratpoison_geometry_and_query)                    \
     TEST_ENTRY(ratpoison_window_list_capacity)                  \
     TEST_ENTRY(ratpoison_nested_removal)                        \
-    TEST_ENTRY(ratpoison_directional_frames)
+    TEST_ENTRY(ratpoison_directional_frames)                    \
+    TEST_ENTRY(ratpoison_recall_covered_window)
 
 static struct {
     char *name;

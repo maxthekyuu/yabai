@@ -252,6 +252,7 @@ struct window_node *view_ratpoison_find_frame(struct view *view, unsigned frame_
 struct window_node *view_ratpoison_frame_in_direction(struct view *view, int direction);
 void view_ratpoison_select_window(struct view *view, uint32_t window_id, bool focus_changed);
 bool view_ratpoison_split(struct view *view, enum window_node_split split);
+bool view_ratpoison_recall_window(struct view *view, struct window *window);
 bool view_ratpoison_remove_frame(struct view *view);
 bool view_ratpoison_only_frame(struct view *view);
 bool view_ratpoison_move_window(struct view *view, struct window *window, struct window_node *target);

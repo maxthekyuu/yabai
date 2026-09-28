@@ -7,6 +7,7 @@ var yabaiRatpoison = (function () {
     var alphabet = '0456789abcdefgimnopqrstuvwxyz';
     var keys = [];
     var timer = null;
+    var transitionTimer = null;
     var modal = null;
     var rendererTask = null;
     var rendererGeneration = 0;
@@ -26,6 +27,8 @@ var yabaiRatpoison = (function () {
         clearKeys();
         if (timer !== null) Timer.off(timer);
         timer = null;
+        if (transitionTimer !== null) Timer.off(transitionTimer);
+        transitionTimer = null;
         closeMenu();
     }
 
@@ -42,12 +45,12 @@ var yabaiRatpoison = (function () {
         timer = Timer.after(8, cancel);
     }
 
-    function show(text, duration) {
+    function show(text, duration, groups, badges) {
         closeMenu();
         var current = rendererGeneration;
         // env execs the helper without a shell. A missing helper then produces
         // exit 127 and a callback; Phoenix otherwise only logs launch failures.
-        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, screen: Screen.main().visibleFrame() })], function (task) {
+        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], badges: badges || [], screen: Screen.main().visibleFrame() })], function (task) {
             if (current !== rendererGeneration) return;
             rendererTask = null;
             if (task.status === 0) { cancel(); return; }
@@ -164,6 +167,10 @@ var yabaiRatpoison = (function () {
         bind('t', ['shift'], function () {
             setLayout(space, space.type === 'ratpoison' ? 'float' : 'ratpoison');
         });
+        bind('m', ['shift'], function () { load('move'); });
+        bind('d', ['shift'], function () { load('displays'); });
+        bind('u', ['shift'], function () { load('spaces'); });
+        bind('f', ['shift'], function () { load('frames'); });
         if (space.type !== 'ratpoison') return;
         var args = ['space', String(space.index)];
         bind('s', ['shift'], function () { update(args.concat(['--split', 'horizontal'])); });
@@ -172,8 +179,6 @@ var yabaiRatpoison = (function () {
         bind('o', ['shift'], function () { update(args.concat(['--only-frame'])); });
         bind('tab', [], function () { update(args.concat(['--focus-frame', 'next'])); });
         bind('tab', ['shift'], function () { update(args.concat(['--focus-frame', 'prev'])); });
-        bind('f', ['shift'], function () { load('frames'); });
-        bind('m', ['shift'], function () { load('move'); });
     }
 
     function clean(text) {
@@ -185,40 +190,335 @@ var yabaiRatpoison = (function () {
         return chars.length <= width ? chars.join('') : chars.slice(0, Math.max(0, width - 1)).join('') + '…';
     }
 
+    // Frame queries expose geometry directly; window/display queries nest it.
+    function frameRect(frame) {
+        return { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+    }
+
     function choices(entries, title, space, windows, choose, page) {
         clearKeys();
         controls(space, windows);
         var screen = Screen.main().visibleFrame();
         var columns = screen.width >= 1100 ? 2 : 1;
-        var rows = Math.max(1, Math.min(12, Math.floor((screen.height * 0.7 - 160) / 18)));
-        var capacity = Math.min(alphabet.length, rows * columns);
-        var pages = Math.max(1, Math.ceil(entries.length / capacity));
-        page = (page + pages) % pages;
-        var visible = entries.slice(page * capacity, (page + 1) * capacity);
-        var columnWidth = Math.max(12, Math.min(68, Math.floor((screen.width - 100) / (columns * 8)) - 3));
-        var width = columns * (columnWidth + 3) - 3;
-        var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages, width),
-                     clip('1 ratpoison   2 floating   3 bsp', width), ''];
-        var cells = visible.map(function (entry, index) {
-            var key = alphabet[index];
-            bind(key, [], function () { choose(entry); });
-            return clip(key + ' ' + entry.label, columnWidth);
+        // Allow the panel to grow to 90% of the usable height. Reserve text
+        // rows for headings, controls and a permanent pagination status line.
+        var chromeRows = space.type === 'ratpoison' ? 9 : 7;
+        var lineBudget = Math.floor((Math.min(screen.height * 0.9, screen.height - 32) - 28) / 18);
+        var rows = Math.max(1, lineBudget - chromeRows - 2);
+        var columnWidth = Math.max(12, Math.min(66, Math.floor((screen.width - 132) / (columns * 8)) - 3));
+        var width = columns * (columnWidth + 3) + 1;
+        var displays = {};
+        entries.forEach(function (entry) {
+            var display = entry.space ? entry.space.display : space.display;
+            (displays[display] || (displays[display] = [])).push(entry);
         });
-        // Fill down each column so hint order follows the visible list.
-        var usedRows = Math.ceil(cells.length / columns);
-        for (var row = 0; row < usedRows; ++row) {
-            var line = cells[row];
-            if (cells[row + usedRows]) line = line.padEnd(columnWidth + 3, ' ') + cells[row + usedRows];
-            lines.push(line);
+        var pages = [];
+        var displayIds = Object.keys(displays).sort(function (a, b) { return Number(a) - Number(b); });
+        var offsets = {};
+        displayIds.forEach(function (display) { offsets[display] = 0; });
+        var remaining = displayIds.slice();
+        while (remaining.length) {
+            var chunks = [], used = 0, count = 0;
+            remaining.forEach(function (display, index) {
+                var available = rows + 2 - used;
+                if (available < 3 || count === alphabet.length) return;
+                // Reserve a heading, one content row and a bottom border for
+                // other displays before filling this display's remaining rows.
+                var otherGroups = Math.min(remaining.length - index - 1, Math.floor(available / 3) - 1, alphabet.length - count - 1);
+                var reserve = otherGroups * 3;
+                var capacity = (available - reserve - 2) * columns;
+                var offset = offsets[display], items = displays[display];
+                var take = Math.min(items.length - offset, capacity, alphabet.length - count - otherGroups);
+                chunks.push({ display: Number(display), continued: offset > 0, entries: items.slice(offset, offset + take) });
+                used += Math.ceil(take / columns) + 2;
+                count += take; offsets[display] += take;
+            });
+            pages.push(chunks);
+            remaining = remaining.filter(function (display) { return offsets[display] < displays[display].length; });
         }
-        if (!cells.length) lines.push('(no windows)');
-        lines.push('', 'arrows/hjkl focus   [ ] page   Esc close', 'Shift-T toggle ratpoison / floating');
+        if (!pages.length) pages.push([]);
+        page = (page + pages.length) % pages.length;
+        var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages.length, width),
+                     clip('1 ratpoison   2 floating   3 bsp   Shift-T toggle', width), ''];
+        var groups = [], badges = [], hint = 0;
+        pages[page].forEach(function (group) {
+            var start = lines.length;
+            var heading = ' Display ' + group.display + (group.continued ? ' (continued)' : '') + ' ';
+            lines.push('┌' + heading + '─'.repeat(Math.max(0, width - heading.length - 2)) + '┐');
+            var cells = group.entries.map(function (entry) {
+                var key = alphabet[hint++];
+                bind(key, [], function () { choose(entry); });
+                if (entry.rect && (!entry.space || entry.space.id === space.id || entry.space['is-visible'])) {
+                    badges.push({ key: key, rect: entry.rect, display: group.display });
+                }
+                return clip(key + ' ' + entry.label, columnWidth);
+            });
+            var usedRows = Math.ceil(cells.length / columns);
+            for (var row = 0; row < usedRows; ++row) {
+                var line = cells[row];
+                if (cells[row + usedRows]) line = line.padEnd(columnWidth + 3, ' ') + cells[row + usedRows];
+                lines.push('│ ' + line.padEnd(width - 4, ' ') + ' │');
+            }
+            lines.push('└' + '─'.repeat(width - 2) + '┘');
+            groups.push({ start: start, end: lines.length - 1, display: group.display });
+        });
+        if (!hint) lines.push('(no choices)');
+        lines.push('Page ' + (page + 1) + '/' + pages.length + ' | ' + hint + '/' + entries.length +
+                   ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
+        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-D/U screens');
         if (space.type === 'ratpoison') {
-            lines.push('Shift-S/V split   Shift-F frames   Shift-M move', 'Shift-R remove    Shift-O only     Tab next');
+            lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next');
         }
-        bind('[', [], function () { choices(entries, title, space, windows, choose, page - 1); });
-        bind(']', [], function () { choices(entries, title, space, windows, choose, page + 1); });
-        show(lines.map(function (line) { return clip(line, width); }).join('\n'));
+        function previousPage() { choices(entries, title, space, windows, choose, page - 1); }
+        function nextPage() { choices(entries, title, space, windows, choose, page + 1); }
+        bind('[', [], previousPage);
+        bind(']', [], nextPage);
+        bind('pageUp', [], previousPage);
+        bind('pageDown', [], nextPage);
+        bind('space', [], nextPage);
+        bind('space', ['shift'], previousPage);
+        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges);
+    }
+
+    // A display is a container whose destination is its currently visible Space.
+    // Neither the source nor destination needs to use ratpoison.
+    function destinations(mode, space, windows, current) {
+        var source = windows.filter(function (window) { return window['has-focus']; })[0];
+        if (mode === 'move' && !source) { error('no focused window to move'); return; }
+        run(['query', '--displays'], function (displayTask) {
+            if (!active || generation !== current) return;
+            var displays;
+            try { displays = JSON.parse(displayTask.output); } catch (_) {}
+            if (displayTask.status !== 0 || !Array.isArray(displays)) { error('display query failed'); return; }
+            run(['query', '--spaces'], function (spaceTask) {
+                if (!active || generation !== current) return;
+                var spaces;
+                try { spaces = JSON.parse(spaceTask.output); } catch (_) {}
+                if (spaceTask.status !== 0 || !Array.isArray(spaces)) { error('Space query failed'); return; }
+                var entries = [];
+                if (mode === 'move' && space.type === 'ratpoison') {
+                    (space.frames || []).forEach(function (frame) {
+                        entries.push({ frame: frame.id, rect: frameRect(frame), label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
+                            (frame.windows.length ? ' [' + frame.windows.length + ' windows]' : ' [empty]') });
+                    });
+                }
+                displays.sort(function (a, b) { return a.index - b.index; }).forEach(function (display) {
+                    var desktops = spaces.filter(function (item) { return item.display === display.index; });
+                    var visible = desktops.filter(function (item) { return item['is-visible']; })[0];
+                    if (mode !== 'spaces' && visible && !visible['is-native-fullscreen']) {
+                        entries.push({ display: display.index, displayId: display.id, space: visible, rect: display.frame,
+                            label: (display['has-focus'] ? '*' : ' ') + ' S' + visible.index + ' (' + display.index + ')' +
+                                (display.label ? ' ' + clean(display.label) : '') + ' [' + visible.type + ']' });
+                    }
+                    if (mode !== 'displays') {
+                        desktops.filter(function (item) { return !item['is-native-fullscreen']; })
+                            .sort(function (a, b) { return a.index - b.index; }).forEach(function (item) {
+                                entries.push({ space: item, rect: item['is-visible'] ? display.frame : null, label: (item['has-focus'] ? '*' : ' ') +
+                                    ' S' + item.index + ' (' + display.index + ')' +
+                                    (item.label ? ' ' + clean(item.label) : '') + ' [' + item.type + ']' });
+                            });
+                    }
+                });
+                choices(entries, mode === 'move' ? 'move + follow' : 'focus ' + mode, space, windows, function (entry) {
+                    if (entry.frame !== undefined) {
+                        update(['window', String(source.id), '--frame', String(entry.frame)]);
+                    } else {
+                        visit(entry, mode === 'move' ? source : null);
+                    }
+                }, 0);
+            });
+        });
+    }
+
+    function visit(entry, source) {
+        var current = ++generation;
+        clearKeys();
+        bind('escape', [], cancel);
+        show(source ? 'Moving window and following…  |  Esc close' : 'Changing container…  |  Esc close');
+        function valid() { return active && generation === current; }
+        function request(args, callback) {
+            run(args, function (task) {
+                if (!valid()) return;
+                if (task.status !== 0) { error(task.error || task.output || 'command failed'); return; }
+                callback(task);
+            });
+        }
+        // WindowServer moves and gesture-based Space switches are asynchronous.
+        // Verify completion before focusing or exposing destination layout keys.
+        function waitFor(args, matches, done, attempts) {
+            request(args, function (task) {
+                var value;
+                try { value = JSON.parse(task.output); } catch (_) { error('invalid destination query response'); return; }
+                if (matches(value)) { done(value); return; }
+                if (attempts <= 1) { error('destination did not become available; check the window and Space'); return; }
+                transitionTimer = Timer.after(0.1, function () {
+                    transitionTimer = null;
+                    if (valid()) waitFor(args, matches, done, attempts - 1);
+                });
+            });
+        }
+        // Resolve Space ids again, because Mission Control indices can change
+        // while the chooser is open. Displays resolve their visible Space anew.
+        function resolveSpace() {
+            request(['query', '--spaces'], function (task) {
+                var spaces;
+                try { spaces = JSON.parse(task.output); } catch (_) {}
+                if (!Array.isArray(spaces)) { error('invalid Space list'); return; }
+                var target = spaces.filter(function (item) {
+                    return entry.display !== undefined ? item.display === entry.display && item['is-visible']
+                                                       : item.id === entry.space.id;
+                })[0];
+                if (!target || (entry.visibleOnly && !target['is-visible']) ||
+                    (target['is-native-fullscreen'] && !entry.visibleOnly)) { error('destination is no longer available'); return; }
+                function focusWindow() {
+                    if (source) request(['window', '--focus', String(source.id)], function () { load('windows'); });
+                    else if (entry.window !== undefined) {
+                        request(['query', '--windows', '--window', String(entry.window)], function (task) {
+                            var window;
+                            try { window = JSON.parse(task.output); } catch (_) {}
+                            if (!window || window.space !== target.index) { error('window is no longer in that container'); return; }
+                            function selectWindow() {
+                                request(['window', '--focus', String(entry.window)], function () { load('windows'); });
+                            }
+                            // Select its existing frame first: remote selection must
+                            // not recall a covered window into a different empty frame.
+                            var owner = target.type === 'ratpoison' && (target.frames || []).filter(function (frame) {
+                                return frame.windows.indexOf(entry.window) !== -1;
+                            })[0];
+                            if (owner) request(['space', String(target.index), '--focus-frame', String(owner.id)], selectWindow);
+                            else selectWindow();
+                        });
+                    } else if (entry.frame !== undefined) {
+                        request(['space', String(target.index), '--focus-frame', String(entry.frame)], function () { load('windows'); });
+                    } else load('windows');
+                }
+                function focusSpace() {
+                    request(['query', '--spaces', '--space'], function (task) {
+                        var focused;
+                        try { focused = JSON.parse(task.output); } catch (_) { error('invalid focused Space'); return; }
+                        if (focused.id === target.id) { focusWindow(); return; }
+                        request(['space', '--focus', String(target.index)], function () {
+                            waitFor(['query', '--spaces', '--space'], function (item) { return item && item.id === target.id; }, focusWindow, 30);
+                        });
+                    });
+                }
+                if (!source) { focusSpace(); return; }
+                request(['window', String(source.id), '--space', String(target.index)], function () {
+                    waitFor(['query', '--windows', '--window', String(source.id)], function (window) {
+                        return window && window.space === target.index;
+                    }, focusSpace, 30);
+                });
+            });
+        }
+        if (entry.display === undefined) { resolveSpace(); return; }
+        request(['query', '--displays'], function (task) {
+            var displays;
+            try { displays = JSON.parse(task.output); } catch (_) {}
+            var display = Array.isArray(displays) && displays.filter(function (item) { return item.id === entry.displayId; })[0];
+            if (!display) { error('display is no longer available'); return; }
+            entry.display = display.index;
+            resolveSpace();
+        });
+    }
+
+    function visibleChoices(mode, space, windows, current) {
+        run(['query', '--spaces'], function (task) {
+            if (!active || generation !== current) return;
+            var spaces;
+            try { spaces = JSON.parse(task.output); } catch (_) {}
+            if (task.status !== 0 || !Array.isArray(spaces)) { error('visible Space query failed'); return; }
+            var visible = spaces.filter(function (item) { return item.id !== space.id && item['is-visible']; })
+                .sort(function (a, b) { return a.index - b.index; });
+            visible.unshift(space);
+            var lists = {};
+            lists[space.id] = windows;
+            var pending = visible.length - 1;
+            function render() {
+                var entries = [], covered = [];
+                visible.forEach(function (item) {
+                    var local = item.id === space.id;
+                    var prefix = 'S' + item.index + ' (' + item.display + ') ';
+                    var byId = {};
+                    lists[item.id].forEach(function (window) { byId[window.id] = window; });
+                    function name(id) {
+                        var window = byId[id];
+                        return window ? clean(window.app + ': ' + window.title) : String(id);
+                    }
+                    function add(entry, background) {
+                        entry.space = item;
+                        entry.visibleOnly = true;
+                        entry.label = prefix + entry.label;
+                        (background ? covered : entries).push(entry);
+                    }
+                    if (item.type === 'ratpoison') {
+                        var frames = item.frames;
+                        frames.forEach(function (frame) {
+                            var label = (local && frame.selected ? '*' : ' ') + ' F' + frame.id;
+                            if (mode === 'frames' || !frame.windows.length) {
+                                add({ frame: frame.id, rect: frameRect(frame), label: label + (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') });
+                            } else {
+                                var id = frame['active-window'] || frame.windows[0];
+                                add({ window: id, rect: frameRect(frame), label: label + ' ' + name(id) });
+                            }
+                        });
+                        if (mode !== 'frames') frames.forEach(function (frame) {
+                            var front = frame['active-window'] || frame.windows[0];
+                            frame.windows.forEach(function (id) {
+                                if (id !== front) add({ window: id, rect: frameRect(frame), label: '  F' + frame.id + ' ' + name(id) }, true);
+                            });
+                        });
+                        if (mode !== 'frames') {
+                            var managed = {};
+                            frames.forEach(function (frame) { frame.windows.forEach(function (id) { managed[id] = true; }); });
+                            lists[item.id].filter(function (window) {
+                                return !managed[window.id] && !window['is-minimized'] && !window['is-hidden'];
+                            }).forEach(function (window) { add({ window: window.id, rect: window.frame, label: '  ' + name(window.id) }); });
+                        }
+                    } else {
+                        var available = lists[item.id].filter(function (window) { return !window['is-minimized'] && !window['is-hidden']; });
+                        if (mode === 'frames' || !available.length) add({ container: true, label: '[' + item.type + (available.length ? ']' : ', empty]') });
+                        else available.sort(function (a, b) { return a.id - b.id; }).forEach(function (window) {
+                            add({ window: window.id, rect: window.frame, label: (window['has-focus'] ? '* ' : '  ') + name(window.id) });
+                        });
+                    }
+                });
+                function present() {
+                    choices(entries.concat(covered), mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
+                        if (entry.space.id !== space.id) { visit(entry, null); return; }
+                        if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
+                        else if (entry.window !== undefined) command(['window', '--focus', String(entry.window)]);
+                        else load('windows');
+                    }, 0);
+                }
+                if (!entries.some(function (entry) { return entry.container; })) { present(); return; }
+                run(['query', '--displays'], function (task) {
+                    if (!active || generation !== current) return;
+                    var displays;
+                    try { displays = JSON.parse(task.output); } catch (_) {}
+                    if (task.status !== 0 || !Array.isArray(displays)) { error('container geometry query failed'); return; }
+                    entries.forEach(function (entry) {
+                        if (!entry.container) return;
+                        var display = displays.filter(function (display) { return display.index === entry.space.display; })[0];
+                        if (display) entry.rect = display.frame;
+                    });
+                    present();
+                });
+            }
+            if (visible.some(function (item) { return item.type === 'ratpoison' && !Array.isArray(item.frames); })) {
+                error('visible Space query lacks frame support'); return;
+            }
+            if (!pending) { render(); return; }
+            visible.slice(1).forEach(function (item) {
+                run(['query', '--windows', '--space', String(item.index)], function (task) {
+                    if (!active || generation !== current) return;
+                    var result;
+                    try { result = JSON.parse(task.output); } catch (_) {}
+                    if (task.status !== 0 || !Array.isArray(result)) { error('visible window query failed'); return; }
+                    lists[item.id] = result;
+                    if (--pending === 0) render();
+                });
+            });
+        });
     }
 
     function load(mode) {
@@ -226,7 +526,8 @@ var yabaiRatpoison = (function () {
         queuedDirection = null;
         clearKeys();
         controls();
-        show('Loading…  |  1 ratpoison  2 floating  3 bsp  |  Esc close');
+        // Do not launch a throwaway loading renderer before the queries finish.
+        closeMenu();
         run(['query', '--spaces', '--space'], function (spaceTask) {
             if (!active || generation !== current) return;
             if (spaceTask.status !== 0) { error(spaceTask.error || 'space query failed'); return; }
@@ -248,55 +549,11 @@ var yabaiRatpoison = (function () {
                     queuedDirection = null;
                     if (navigate(space, windows, direction)) return;
                 }
-                var byId = {};
-                windows.forEach(function (window) { byId[window.id] = window; });
-                function name(id) {
-                    var window = byId[id];
-                    return window ? clean(window.app + ': ' + window.title) : String(id);
+                if (mode === 'move' || mode === 'displays' || mode === 'spaces') {
+                    destinations(mode, space, windows, current);
+                    return;
                 }
-                var frames = space.frames || [];
-                if (mode === 'windows' || space.type !== 'ratpoison') {
-                    var entries = [];
-                    if (space.type === 'ratpoison') {
-                        frames.forEach(function (frame) {
-                            var mark = frame.selected ? '*' : ' ';
-                            if (!frame.windows.length) {
-                                entries.push({ frame: frame.id, label: mark + ' F' + frame.id + ' [empty]' });
-                            } else {
-                                var id = frame['active-window'] || frame.windows[0];
-                                entries.push({ id: id, label: mark + ' F' + frame.id + ' ' + name(id) });
-                            }
-                        });
-                        // Show one entry per frame first, including empties, so
-                        // a large stack cannot bury a newly created container.
-                        frames.forEach(function (frame) {
-                            var front = frame['active-window'] || frame.windows[0];
-                            frame.windows.forEach(function (id) {
-                                if (id !== front) entries.push({ id: id, label: '  F' + frame.id + ' ' + name(id) });
-                            });
-                        });
-                    } else {
-                        windows.filter(function (window) { return !window['is-minimized'] && !window['is-hidden']; })
-                            .sort(function (a, b) { return a.id - b.id; }).forEach(function (window) {
-                                entries.push({ id: window.id, label: (window['has-focus'] ? '* ' : '  ') + name(window.id) });
-                            });
-                    }
-                    choices(entries, 'windows / frames', space, windows, function (entry) {
-                        if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
-                        else command(['window', '--focus', String(entry.id)]);
-                    }, 0);
-                } else {
-                    var source = windows.filter(function (window) { return window['has-focus']; })[0];
-                    if (mode === 'move' && !source) { error('no focused window to move'); return; }
-                    choices(frames.map(function (frame) {
-                        return { id: frame.id, label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
-                            (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') };
-                    }), mode === 'move' ? 'move to frame' : 'select frame', space, windows,
-                    function (entry) {
-                        update(mode === 'move' ? ['window', String(source.id), '--frame', String(entry.id)]
-                               : ['space', String(space.index), '--focus-frame', String(entry.id)]);
-                    }, 0);
-                }
+                visibleChoices(mode, space, windows, current);
             });
         });
     }

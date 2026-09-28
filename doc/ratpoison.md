@@ -4,7 +4,11 @@ Ratpoison is a manual layout: windows share persistent frames, and only explicit
 commands split or remove frames. Closing, hiding, minimizing, or floating a window
 leaves its frame in place. New windows stack in the selected frame. Selecting an
 empty frame sets the destination for the next window; macOS focus stays on the
-previous window until an occupied frame/window is selected.
+previous window until an occupied frame/window is selected. With an empty frame
+selected, choosing a covered window from another frame's stack (through the
+prefix menu or `window --focus`) moves it into the empty frame. Choosing an
+already visible window focuses its existing frame. This recall applies within
+the active Space; minimized, hidden, and other-Space windows are not recalled.
 
 ```sh
 yabai -m space --layout ratpoison
@@ -75,13 +79,16 @@ Press **Super-S (Command-S)**, release it, then choose:
 | Arrows or `h/j/k/l` | Focus west/south/north/east, including empty frames |
 | `Shift-S` | Split horizontally (top/bottom) |
 | `Shift-V` | Split vertically (left/right) |
-| `Shift-F`, then a label | Select a frame, including empty frames |
-| `Shift-M`, then a label | Move the focused window to a frame |
+| `Shift-F`, then a label | Select a frame or container on any visible Space |
+| `Shift-M`, then a label | Move to a frame, display, or Space; follow cross-Space moves |
+| `Shift-D`, then a label | Focus a physical display's visible Space |
+| `Shift-U`, then a label | Focus a virtual desktop (Space) |
 | `Tab` / `Shift-Tab` | Next / previous frame |
 | `Shift-R` | Remove selected frame |
 | `Shift-O` | Keep only selected frame, collecting its windows |
 | `Shift-T` | Toggle ratpoison; leaving it always chooses floating |
-| `[` / `]` | Previous / next page of choices |
+| `[` / `]`, Page Up / Page Down | Previous / next page of choices |
+| Space / Shift-Space | Next / previous page of choices |
 | Escape, Super-S again, click, or 8 idle seconds | Close the menu |
 
 Navigation, splitting, and empty-frame selection keep the menu open and refresh
@@ -91,6 +98,69 @@ the menu. Choosing the already-active mode leaves its layout intact. Mode keys
 work in floating and BSP as well; the menu continues to list their windows.
 Floating-mode directional navigation chooses the nearest window centre in that
 direction; BSP uses yabai's existing managed-window navigation.
+
+### Displays and virtual desktops
+
+The main `Super-S` chooser lists windows and frames on **all currently visible
+Spaces across physical displays**, grouped in physical display number order.
+The current page's selection keys also appear at the centers of its windows,
+frames, and visible Space containers. Labels use the corresponding display color.
+Stacked windows sharing a center show their keys together; the menu identifies
+which key belongs to each window. Paging replaces the labels, and closing the
+menu removes all of them. Hidden Spaces have no on-screen label.
+
+The native menu and labels share one helper process. Labels are small,
+nonactivating, click-through panels with no animation or recurring polling.
+Window/frame positions reuse the menu's query results; whole-Space containers
+need one display-geometry query per refresh. At most one page of labels is drawn. The dialog grows with its contents up to
+90% of the available screen height, with at most 29 distinct selection keys per
+page. A permanent page/count indicator shows how many choices and displays are
+on the current page. Page keys wrap and reuse the loaded choices without
+querying yabai again.
+
+Each display has a labeled box with its own terminal color. Pagination reserves room for each display before filling extra rows from a large
+group, so a display with many Spaces does not hide the other displays when they
+fit on the page. Large groups repeat
+their heading with `(continued)` on subsequent pages. Every entry
+starts with `Sx (display number)`. Empty ratpoison frames are selectable directly;
+an empty floating/BSP Space appears as an empty container. Hidden virtual
+desktops remain available through `Shift-U`.
+
+Selecting a remote entry activates its Space, then focuses its window or selects
+its empty frame. The menu stays open on that destination so layout keys and frame
+commands apply there. Covered stack windows stay in their existing remote frame;
+local empty-frame recall behavior is unchanged. `Shift-F` lists frames and Space
+containers across the same visible Spaces, from any layout. Arrow/hjkl navigation
+continues to operate within the active Space. Use selection labels to cross displays.
+
+
+Display and Space containers are available in every layout. `Super-S`, then
+`Shift-M`, opens a destination list: local ratpoison frames first, followed by
+physical display shortcuts and their virtual desktops. Each display entry
+represents its currently visible Space. Space entries also include desktops
+that are not currently visible; native fullscreen Spaces are excluded.
+Labels lead with the virtual desktop number and the physical display number in
+parentheses: `S1 (1)` means Space 1 on display 1. The current layout and any
+configured display/Space label follow. Use `[` and `]` to page through long destination lists.
+
+For example, to send a window to a floating external display and start tiling:
+
+1. Focus the window, press `Super-S`, then `Shift-M`.
+2. Choose the external display's visible Space, shown as `Sx (display number)`.
+3. After the window moves and receives focus there, press `1` for ratpoison,
+   `2` for floating, or `3` for BSP. The menu stays open after arrival.
+
+Moving to a ratpoison Space uses its selected frame; the source frame remains
+in place even when empty. Moving to another layout uses yabai's normal placement.
+`Shift-D` and `Shift-U` let you visit containers without moving a window, including
+empty desktops, then change their layout with the same number keys.
+
+Moves and Space switches use existing yabai commands and require the same macOS
+permissions as those commands. The menu waits for asynchronous completion before
+following focus or enabling destination layout controls. A failure stops the
+sequence and displays an error. Escape stops subsequent steps; a move already
+sent to yabai is not undone. Space and display indices are resolved again from their ids
+before acting; destination lists are refreshed each time the chooser opens.
 
 **Exiting ratpoison with Shift-T defaults to floating**, even if it was entered
 from BSP. Selecting `3` explicitly chooses BSP instead. Closing the prefix menu

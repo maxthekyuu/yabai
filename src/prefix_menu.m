@@ -12,6 +12,7 @@ static NSColor *terminal_color(unsigned rgb)
 @interface PrefixMenuView : NSView
 @property(nonatomic, strong) NSArray<NSString *> *lines;
 @property(nonatomic, strong) NSFont *font;
+@property(nonatomic, strong) NSArray *groups;
 @property(nonatomic) CGFloat lineHeight;
 @end
 
@@ -45,6 +46,20 @@ static NSColor *terminal_color(unsigned rgb)
                 }
             }
         }
+        // Display colors decorate the outline and heading, preserving readable
+        // gray text and the existing selected/empty-frame highlights inside.
+        const unsigned palette[] = { 0x55ffff, 0xff55ff, 0x55ff55, 0xffff55, 0x5555ff, 0xff5555 };
+        for (NSDictionary *group in self.groups) {
+            NSUInteger start = [group[@"start"] unsignedIntegerValue], end = [group[@"end"] unsignedIntegerValue];
+            if (i < start || i > end || !line.length) continue;
+            NSUInteger display = [group[@"display"] unsignedIntegerValue];
+            NSColor *outline = terminal_color(palette[(display ? display - 1 : 0) % 6]);
+            if (i == start || i == end) [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(0, line.length)];
+            else {
+                [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(0, 1)];
+                [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(line.length - 1, 1)];
+            }
+        }
         [text drawAtPoint:NSMakePoint(14, y)];
         [NSGraphicsContext restoreGraphicsState];
         y += self.lineHeight;
@@ -58,6 +73,79 @@ static NSColor *terminal_color(unsigned rgb)
 - (BOOL)canBecomeKeyWindow { return NO; }
 - (BOOL)canBecomeMainWindow { return NO; }
 @end
+
+@interface PrefixHintView : NSView
+@property(nonatomic, strong) NSString *keys;
+@property(nonatomic, strong) NSFont *font;
+@property(nonatomic, strong) NSColor *color;
+@end
+@implementation PrefixHintView
+- (BOOL)isOpaque { return YES; }
+- (void)drawRect:(NSRect)dirtyRect
+{
+    [NSColor.blackColor setFill];
+    NSRectFill(self.bounds);
+    [self.color setStroke];
+    NSBezierPath *outline = [NSBezierPath bezierPathWithRect:NSInsetRect(self.bounds, 1, 1)];
+    outline.lineWidth = 2;
+    [outline stroke];
+    NSDictionary *attributes = @{ NSFontAttributeName: self.font, NSForegroundColorAttributeName: self.color };
+    NSSize size = [self.keys sizeWithAttributes:attributes];
+    [self.keys drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2,
+                                      (self.bounds.size.height - size.height) / 2) withAttributes:attributes];
+}
+@end
+
+// Yabai geometry uses global top-left coordinates. AppKit uses bottom-left
+// coordinates relative to the primary display, including negative-origin screens.
+static NSArray *hint_layout(id badges, NSFont *font)
+{
+    if (!badges) return @[];
+    if (![badges isKindOfClass:NSArray.class] || [badges count] > 32) return nil;
+    NSMutableArray *groups = [NSMutableArray array];
+    CGFloat primaryHeight = CGDisplayBounds(CGMainDisplayID()).size.height;
+    for (id badge in badges) {
+        if (![badge isKindOfClass:NSDictionary.class]) return nil;
+        NSString *key = badge[@"key"];
+        NSDictionary *rect = badge[@"rect"];
+        if (![key isKindOfClass:NSString.class] || key.length != 1 ||
+            [@"0456789abcdefgimnopqrstuvwxyz" rangeOfString:key].location == NSNotFound ||
+            ![rect isKindOfClass:NSDictionary.class] || ![badge[@"display"] isKindOfClass:NSNumber.class]) return nil;
+        for (NSString *field in @[@"x", @"y", @"w", @"h"]) {
+            if (![rect[field] isKindOfClass:NSNumber.class] || !isfinite([rect[field] doubleValue]) ||
+                fabs([rect[field] doubleValue]) > 1000000) return nil;
+        }
+        if ([rect[@"w"] doubleValue] <= 0 || [rect[@"h"] doubleValue] <= 0) return nil;
+        CGFloat x = [rect[@"x"] doubleValue] + [rect[@"w"] doubleValue] / 2;
+        CGFloat y = primaryHeight - [rect[@"y"] doubleValue] - [rect[@"h"] doubleValue] / 2;
+        // Stacked windows share a center. Show their keys together instead of
+        // placing opaque labels on top of one another.
+        NSMutableDictionary *match = nil;
+        for (NSMutableDictionary *group in groups) {
+            if (fabs([group[@"cx"] doubleValue] - x) < 1 && fabs([group[@"cy"] doubleValue] - y) < 1) { match = group; break; }
+        }
+        if (match) match[@"keys"] = [match[@"keys"] stringByAppendingFormat:@" %@", key];
+        else [groups addObject:[@{ @"keys":key, @"cx":@(x), @"cy":@(y), @"display":badge[@"display"] } mutableCopy]];
+    }
+    for (NSMutableDictionary *group in groups) {
+        NSSize text = [group[@"keys"] sizeWithAttributes:@{ NSFontAttributeName:font }];
+        CGFloat width = MAX(28, ceil(text.width) + 16), height = MAX(28, ceil(text.height) + 10);
+        group[@"x"] = @([group[@"cx"] doubleValue] - width / 2);
+        group[@"y"] = @([group[@"cy"] doubleValue] - height / 2);
+        group[@"width"] = @(width); group[@"height"] = @(height);
+    }
+    return groups;
+}
+
+static PrefixHintView *hint_view(NSDictionary *hint, NSFont *font)
+{
+    const unsigned colors[] = { 0x55ffff, 0xff55ff, 0x55ff55, 0xffff55, 0x5555ff, 0xff5555 };
+    PrefixHintView *view = [[PrefixHintView alloc] initWithFrame:NSMakeRect(0, 0, [hint[@"width"] doubleValue], [hint[@"height"] doubleValue])];
+    view.font = font; view.keys = hint[@"keys"];
+    NSUInteger display = [hint[@"display"] unsignedIntegerValue];
+    view.color = terminal_color(colors[(display ? display - 1 : 0) % 6]);
+    return view;
+}
 
 int main(int argc, const char **argv)
 {
@@ -80,6 +168,8 @@ int main(int argc, const char **argv)
             fprintf(stderr, "install the GoMono Nerd Font Mono font before using the prefix menu\n");
             return 1;
         }
+        NSArray *hints = hint_layout(payload[@"badges"], font);
+        if (!hints) { fprintf(stderr, "invalid hint geometry\n"); return 1; }
         NSArray *lines = [payload[@"text"] componentsSeparatedByString:@"\n"];
         CGFloat lineHeight = ceil(font.ascender - font.descender + font.leading) + 2;
         CGFloat width = 0;
@@ -105,13 +195,34 @@ int main(int argc, const char **argv)
         PrefixMenuView *view = [[PrefixMenuView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
         view.font = font;
         view.lines = lines;
+        id groups = payload[@"groups"];
+        if (groups && ![groups isKindOfClass:[NSArray class]]) return 1;
+        for (id group in groups) {
+            if (![group isKindOfClass:[NSDictionary class]]) return 1;
+            for (NSString *key in @[@"start", @"end", @"display"]) {
+                if (![group[key] isKindOfClass:[NSNumber class]]) return 1;
+            }
+            if ([group[@"start"] integerValue] < 0 || [group[@"end"] unsignedIntegerValue] >= lines.count ||
+                [group[@"start"] unsignedIntegerValue] > [group[@"end"] unsignedIntegerValue] ||
+                [group[@"display"] integerValue] < 1) return 1;
+        }
+        view.groups = groups;
         view.lineHeight = lineHeight;
         if (snapshot) {
             NSBitmapImageRep *bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
             [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
             NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
             if (![png writeToFile:[NSString stringWithUTF8String:argv[2]] atomically:YES]) return 1;
-            printf("{\"font\":\"%s\",\"size\":12,\"width\":%.0f,\"height\":%.0f}\n", font.fontName.UTF8String, size.width, size.height);
+            NSDictionary *metrics = @{ @"font":font.fontName, @"size":@12, @"width":@(size.width), @"height":@(size.height), @"badges":hints };
+            NSData *json = [NSJSONSerialization dataWithJSONObject:metrics options:0 error:NULL];
+            puts([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
+            if (hints.count) {
+                PrefixHintView *hint = hint_view(hints[0], font);
+                NSBitmapImageRep *bitmap = [hint bitmapImageRepForCachingDisplayInRect:hint.bounds];
+                [hint cacheDisplayInRect:hint.bounds toBitmapImageRep:bitmap];
+                NSString *path = [[NSString stringWithUTF8String:argv[2]] stringByAppendingString:@".hint.png"];
+                if (![[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES]) return 1;
+            }
             return 0;
         }
         NSRect frame = NSMakeRect(screen.origin.x + (screen.size.width - size.width) / 2,
@@ -130,6 +241,22 @@ int main(int argc, const char **argv)
                                    NSWindowCollectionBehaviorFullScreenAuxiliary |
                                    NSWindowCollectionBehaviorIgnoresCycle;
         [panel orderFrontRegardless];
+        __attribute__((objc_precise_lifetime)) NSMutableArray *hintPanels = [NSMutableArray array];
+        for (NSDictionary *hint in hints) {
+            NSRect bounds = NSMakeRect([hint[@"x"] doubleValue], [hint[@"y"] doubleValue],
+                                      [hint[@"width"] doubleValue], [hint[@"height"] doubleValue]);
+            PrefixMenuPanel *badge = [[PrefixMenuPanel alloc] initWithContentRect:bounds
+                styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                backing:NSBackingStoreBuffered defer:NO];
+            badge.contentView = hint_view(hint, font);
+            badge.backgroundColor = NSColor.blackColor;
+            badge.opaque = YES; badge.hasShadow = NO;
+            badge.ignoresMouseEvents = YES; badge.hidesOnDeactivate = NO;
+            badge.level = NSStatusWindowLevel + 1;
+            badge.collectionBehavior = panel.collectionBehavior;
+            [badge orderFrontRegardless];
+            [hintPanels addObject:badge];
+        }
         // A crash/reload of the controller cannot leave an orphaned HUD forever.
         [NSTimer scheduledTimerWithTimeInterval:10 repeats:NO block:^(NSTimer *timer) { [NSApp terminate:nil]; }];
         [NSApp run];
