@@ -102,6 +102,17 @@ direction; BSP uses yabai's existing managed-window navigation.
 
 The main `Super-S` chooser lists windows and frames on **all currently visible
 Spaces across physical displays**, grouped in physical display number order.
+The current page's selection keys also appear at the centers of its windows,
+frames, and visible Space containers. Labels use the corresponding display color.
+Stacked windows sharing a center show their keys together; the menu identifies
+which key belongs to each window. Paging replaces the labels, and closing the
+menu removes all of them. Hidden Spaces have no on-screen label.
+
+The native menu and labels share one helper process. Labels are small,
+nonactivating, click-through panels with no animation or recurring polling.
+Window/frame positions reuse the menu's query results; whole-Space containers
+need one display-geometry query per refresh. At most one page of labels is drawn.
+
 Each display has a labeled box with its own terminal color. Large groups repeat
 their heading with `(continued)` on subsequent pages. Every entry
 starts with `Sx (display number)`. Empty ratpoison frames are selectable directly;

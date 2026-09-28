@@ -69,7 +69,10 @@ const fullscreen = { id: 105, index: 5, display: 2, type: 'float', 'is-visible':
 const desktops = [space, remote, desktop, fullscreen];
 function refresh(currentSpace = space, currentWindows = windows) {
     reply(currentSpace); reply(currentWindows);
-    if (tasks[0] && tasks[0].args.join(' ') === '-m query --spaces') reply([currentSpace]);
+    if (tasks[0] && tasks[0].args.join(' ') === '-m query --spaces') {
+        reply([currentSpace]);
+        if (tasks[0] && tasks[0].args.join(' ') === '-m query --displays') reply(displays);
+    }
 }
 function open(currentSpace = space, currentWindows = windows) { press('s', ['cmd']); refresh(currentSpace, currentWindows); }
 idle();
@@ -238,6 +241,7 @@ function visibleMenu(other = remoteFrames, otherWindows = remoteWindows, mode) {
     reply(single); reply([windows[0]]);
     expectCommand(['query', '--spaces']); reply([single, other, desktop]);
     expectCommand(['query', '--windows', '--space', '3']); reply(otherWindows);
+    if (tasks[0] && tasks[0].args.join(' ') === '-m query --displays') reply(displays);
     assert.equal(tasks.length, 0); // The hidden S4 was never queried.
 }
 visibleMenu();
@@ -275,6 +279,38 @@ press('escape'); reply(remoteWindows); idle();
 press('s', ['cmd']); reply(remote); reply([remoteWindows[0]]); reply([remote, single]); reply([windows[0]]);
 assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2]);
 press('4'); expectCommand(['window', '--focus', '30']); reply(null); idle();
+// Labels use existing frame/window geometry and exactly the current page's keys.
+const badgeRect = { x: -900, y: -100, w: 400, h: 300 };
+const badgeSpace = { ...space, frames: [
+    { id: 0, selected: true, windows: [10, 20], 'active-window': 10, frame: badgeRect },
+    { id: 7, windows: [], frame: { x: -500, y: -100, w: 400, h: 300 } }
+] };
+open(badgeSpace);
+assert.deepEqual(Array.from(lastMenu.badges, b => b.key), ['0', '4', '5']);
+assert.equal(lastMenu.badges[0].rect.x, -900);
+assert.equal(lastMenu.badges[1].rect.x, -500);
+assert.equal(tasks.length, 0); // No additional geometry query for frames.
+assert.equal(renderers.size, 1); // Menu and all badges share one process.
+press('escape'); idle();
+open({ ...space, type: 'float' });
+assert.equal(lastMenu.badges[0].rect.x, windows[0].frame.x); press('escape'); idle();
+const withRects = many.map((w, i) => ({ ...w, frame: { x: i * 10, y: 0, w: 200, h: 100 } }));
+open({ ...space, type: 'float' }, withRects);
+assert.equal(lastMenu.badges.length, 24);
+press(']'); assert.equal(lastMenu.badges[0].key, '0'); assert.equal(lastMenu.badges[0].rect.x, 240);
+assert.equal(renderers.size, 1); press('escape'); idle();
+fs.writeFileSync('/tmp/yabai-prefix-hint-menu.json', JSON.stringify(lastMenu));
+// Empty visible containers get a single display-bounds query; hidden Spaces
+// never receive badges on the currently visible desktop.
+displays[0].frame = { x: 0, y: 0, w: 1400, h: 1000 };
+displays[1].frame = { x: -1000, y: 0, w: 1000, h: 800 };
+open({ ...space, type: 'float' }, []);
+assert.equal(lastMenu.badges.length, 1);
+assert.equal(lastMenu.badges[0].rect.w, 1400); press('escape'); idle();
+destinations('u');
+assert.equal(lastMenu.badges.length, 2);
+assert.deepEqual(Array.from(lastMenu.badges, b => b.key), ['0', '4']);
+press('escape'); idle();
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();

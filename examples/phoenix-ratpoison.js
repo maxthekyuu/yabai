@@ -45,12 +45,12 @@ var yabaiRatpoison = (function () {
         timer = Timer.after(8, cancel);
     }
 
-    function show(text, duration, groups) {
+    function show(text, duration, groups, badges) {
         closeMenu();
         var current = rendererGeneration;
         // env execs the helper without a shell. A missing helper then produces
         // exit 127 and a callback; Phoenix otherwise only logs launch failures.
-        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], screen: Screen.main().visibleFrame() })], function (task) {
+        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], badges: badges || [], screen: Screen.main().visibleFrame() })], function (task) {
             if (current !== rendererGeneration) return;
             rendererTask = null;
             if (task.status === 0) { cancel(); return; }
@@ -223,7 +223,7 @@ var yabaiRatpoison = (function () {
         page = (page + pages.length) % pages.length;
         var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages.length, width),
                      clip('1 ratpoison   2 floating   3 bsp   Shift-T toggle', width), ''];
-        var groups = [], hint = 0;
+        var groups = [], badges = [], hint = 0;
         pages[page].forEach(function (group) {
             var start = lines.length;
             var heading = ' Display ' + group.display + (group.continued ? ' (continued)' : '') + ' ';
@@ -231,6 +231,9 @@ var yabaiRatpoison = (function () {
             var cells = group.entries.map(function (entry) {
                 var key = alphabet[hint++];
                 bind(key, [], function () { choose(entry); });
+                if (entry.rect && (!entry.space || entry.space.id === space.id || entry.space['is-visible'])) {
+                    badges.push({ key: key, rect: entry.rect, display: group.display });
+                }
                 return clip(key + ' ' + entry.label, columnWidth);
             });
             var usedRows = Math.ceil(cells.length / columns);
@@ -249,7 +252,7 @@ var yabaiRatpoison = (function () {
         }
         bind('[', [], function () { choices(entries, title, space, windows, choose, page - 1); });
         bind(']', [], function () { choices(entries, title, space, windows, choose, page + 1); });
-        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups);
+        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges);
     }
 
     // A display is a container whose destination is its currently visible Space.
@@ -270,7 +273,7 @@ var yabaiRatpoison = (function () {
                 var entries = [];
                 if (mode === 'move' && space.type === 'ratpoison') {
                     (space.frames || []).forEach(function (frame) {
-                        entries.push({ frame: frame.id, label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
+                        entries.push({ frame: frame.id, rect: frame.frame, label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
                             (frame.windows.length ? ' [' + frame.windows.length + ' windows]' : ' [empty]') });
                     });
                 }
@@ -278,14 +281,14 @@ var yabaiRatpoison = (function () {
                     var desktops = spaces.filter(function (item) { return item.display === display.index; });
                     var visible = desktops.filter(function (item) { return item['is-visible']; })[0];
                     if (mode !== 'spaces' && visible && !visible['is-native-fullscreen']) {
-                        entries.push({ display: display.index, displayId: display.id, space: visible,
+                        entries.push({ display: display.index, displayId: display.id, space: visible, rect: display.frame,
                             label: (display['has-focus'] ? '*' : ' ') + ' S' + visible.index + ' (' + display.index + ')' +
                                 (display.label ? ' ' + clean(display.label) : '') + ' [' + visible.type + ']' });
                     }
                     if (mode !== 'displays') {
                         desktops.filter(function (item) { return !item['is-native-fullscreen']; })
                             .sort(function (a, b) { return a.index - b.index; }).forEach(function (item) {
-                                entries.push({ space: item, label: (item['has-focus'] ? '*' : ' ') +
+                                entries.push({ space: item, rect: item['is-visible'] ? display.frame : null, label: (item['has-focus'] ? '*' : ' ') +
                                     ' S' + item.index + ' (' + display.index + ')' +
                                     (item.label ? ' ' + clean(item.label) : '') + ' [' + item.type + ']' });
                             });
@@ -427,16 +430,16 @@ var yabaiRatpoison = (function () {
                         frames.forEach(function (frame) {
                             var label = (local && frame.selected ? '*' : ' ') + ' F' + frame.id;
                             if (mode === 'frames' || !frame.windows.length) {
-                                add({ frame: frame.id, label: label + (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') });
+                                add({ frame: frame.id, rect: frame.frame, label: label + (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') });
                             } else {
                                 var id = frame['active-window'] || frame.windows[0];
-                                add({ window: id, label: label + ' ' + name(id) });
+                                add({ window: id, rect: frame.frame, label: label + ' ' + name(id) });
                             }
                         });
                         if (mode !== 'frames') frames.forEach(function (frame) {
                             var front = frame['active-window'] || frame.windows[0];
                             frame.windows.forEach(function (id) {
-                                if (id !== front) add({ window: id, label: '  F' + frame.id + ' ' + name(id) }, true);
+                                if (id !== front) add({ window: id, rect: frame.frame, label: '  F' + frame.id + ' ' + name(id) }, true);
                             });
                         });
                         if (mode !== 'frames') {
@@ -444,22 +447,37 @@ var yabaiRatpoison = (function () {
                             frames.forEach(function (frame) { frame.windows.forEach(function (id) { managed[id] = true; }); });
                             lists[item.id].filter(function (window) {
                                 return !managed[window.id] && !window['is-minimized'] && !window['is-hidden'];
-                            }).forEach(function (window) { add({ window: window.id, label: '  ' + name(window.id) }); });
+                            }).forEach(function (window) { add({ window: window.id, rect: window.frame, label: '  ' + name(window.id) }); });
                         }
                     } else {
                         var available = lists[item.id].filter(function (window) { return !window['is-minimized'] && !window['is-hidden']; });
-                        if (mode === 'frames' || !available.length) add({ label: '[' + item.type + (available.length ? ']' : ', empty]') });
+                        if (mode === 'frames' || !available.length) add({ container: true, label: '[' + item.type + (available.length ? ']' : ', empty]') });
                         else available.sort(function (a, b) { return a.id - b.id; }).forEach(function (window) {
-                            add({ window: window.id, label: (window['has-focus'] ? '* ' : '  ') + name(window.id) });
+                            add({ window: window.id, rect: window.frame, label: (window['has-focus'] ? '* ' : '  ') + name(window.id) });
                         });
                     }
                 });
-                choices(entries.concat(covered), mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
-                    if (entry.space.id !== space.id) { visit(entry, null); return; }
-                    if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
-                    else if (entry.window !== undefined) command(['window', '--focus', String(entry.window)]);
-                    else load('windows');
-                }, 0);
+                function present() {
+                    choices(entries.concat(covered), mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
+                        if (entry.space.id !== space.id) { visit(entry, null); return; }
+                        if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
+                        else if (entry.window !== undefined) command(['window', '--focus', String(entry.window)]);
+                        else load('windows');
+                    }, 0);
+                }
+                if (!entries.some(function (entry) { return entry.container; })) { present(); return; }
+                run(['query', '--displays'], function (task) {
+                    if (!active || generation !== current) return;
+                    var displays;
+                    try { displays = JSON.parse(task.output); } catch (_) {}
+                    if (task.status !== 0 || !Array.isArray(displays)) { error('container geometry query failed'); return; }
+                    entries.forEach(function (entry) {
+                        if (!entry.container) return;
+                        var display = displays.filter(function (display) { return display.index === entry.space.display; })[0];
+                        if (display) entry.rect = display.frame;
+                    });
+                    present();
+                });
             }
             if (visible.some(function (item) { return item.type === 'ratpoison' && !Array.isArray(item.frames); })) {
                 error('visible Space query lacks frame support'); return;
@@ -483,7 +501,8 @@ var yabaiRatpoison = (function () {
         queuedDirection = null;
         clearKeys();
         controls();
-        show('Loading…  |  1 ratpoison  2 floating  3 bsp  |  Esc close');
+        // Do not launch a throwaway loading renderer before the queries finish.
+        closeMenu();
         run(['query', '--spaces', '--space'], function (spaceTask) {
             if (!active || generation !== current) return;
             if (spaceTask.status !== 0) { error(spaceTask.error || 'space query failed'); return; }
