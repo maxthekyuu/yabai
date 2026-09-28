@@ -19,7 +19,7 @@ const context = {
         off(id) { keys.delete(id); }
     },
     Timer: {
-        after(seconds, callback) { const id = nextId++; timers.set(id, callback); return id; },
+        after(seconds, callback) { const id = nextId++; callback.delay = seconds; timers.set(id, callback); return id; },
         off(id) { timers.delete(id); }
     },
     Event: { on() {} },
@@ -56,12 +56,17 @@ function reply(value, status = 0) {
 }
 function expectCommand(args) { assert.deepEqual(Array.from(tasks[0].args), ['-m', ...args]); }
 function idle() { assert.equal(keys.size, 1); assert.equal(renderers.size, 0); }
-const space = { index: 2, type: 'ratpoison', frames: [
+const space = { id: 102, display: 1, 'is-visible': true, 'has-focus': true, index: 2, type: 'ratpoison', frames: [
     { id: 0, selected: true, windows: [10, 20], 'active-window': 10 },
     { id: 7, selected: false, windows: [], 'active-window': 0 }
 ] };
 const windows = [{ id: 10, app: 'Terminal', title: 'One', 'has-focus': true, frame: { x: 0, y: 0, w: 100, h: 100 } },
                  { id: 20, app: 'Editor', title: 'Two', 'has-focus': false, frame: { x: 200, y: 0, w: 100, h: 100 } }];
+const displays = [{ id: 501, index: 1, 'has-focus': true }, { id: 502, index: 2, label: 'External' }];
+const remote = { id: 103, index: 3, display: 2, type: 'float', 'is-visible': true };
+const desktop = { id: 104, index: 4, display: 2, type: 'bsp', 'is-visible': false };
+const fullscreen = { id: 105, index: 5, display: 2, type: 'float', 'is-visible': false, 'is-native-fullscreen': true };
+const desktops = [space, remote, desktop, fullscreen];
 function refresh(currentSpace = space, currentWindows = windows) { reply(currentSpace); reply(currentWindows); }
 function open(currentSpace = space, currentWindows = windows) { press('s', ['cmd']); refresh(currentSpace, currentWindows); }
 idle();
@@ -87,7 +92,7 @@ press('s', ['cmd']); press('l'); refresh();
 expectCommand(['space', '2', '--focus-frame', 'east']); reply(null); refresh(); press('escape'); idle();
 open(); press('f', ['shift']); refresh(); press('4');
 expectCommand(['space', '2', '--focus-frame', '7']); reply(null); refresh(); press('escape');
-open(); press('m', ['shift']); refresh(); press('4');
+open(); press('m', ['shift']); refresh(); reply(displays); reply(desktops); press('4');
 expectCommand(['window', '10', '--frame', '7']); reply(null); refresh(); press('escape');
 open(); press('v', ['shift']); expectCommand(['space', '2', '--split', 'vertical']); reply(null); refresh();
 assert.ok(lastMenu.text.includes('[empty]')); press('escape'); idle();
@@ -126,9 +131,98 @@ assert.ok(lastMenu.text.split('\n').length <= 20);
 assert.deepEqual(lastMenu.screen, screen);
 assert.ok(lastMenu.text.split('\n').every(line => line.length <= 68));
 press(']'); press('0'); expectCommand(['window', '--focus', '11']); reply(null); idle();
+// Display and Space containers are available in every layout. Move + follow
+// waits for WindowServer completion and keeps layout controls on the destination.
+screen = { x: 0, y: 0, width: 1400, height: 1000 };
+function destinations(mode, currentSpace = space) {
+    open(currentSpace); press(mode, ['shift']); refresh(currentSpace);
+    expectCommand(['query', '--displays']); reply(displays);
+    expectCommand(['query', '--spaces']); reply(desktops);
+}
+function resolveDestination(spaces = desktops, screens = displays) {
+    if (tasks[0].args.includes('--displays')) { expectCommand(['query', '--displays']); reply(screens); }
+    expectCommand(['query', '--spaces']); reply(spaces);
+}
+for (const type of ['ratpoison', 'float', 'bsp']) {
+    destinations('d', { ...space, type });
+    assert.ok(lastMenu.text.includes('D2 External / S3 [float]'));
+    press('4'); resolveDestination();
+    expectCommand(['query', '--spaces', '--space']); reply(space);
+    expectCommand(['space', '--focus', '3']); reply(null);
+    expectCommand(['query', '--spaces', '--space']); reply(remote);
+    refresh(remote); press('1'); expectCommand(['space', '3', '--layout', 'ratpoison']); reply(null); idle();
+}
+for (const type of ['ratpoison', 'float', 'bsp']) {
+    destinations('m', { ...space, type });
+    assert.ok(!lastMenu.text.includes('S5'));
+    // Frames precede D1, S2, D2, S3, S4 in ratpoison; other layouts start at D1.
+    press(type === 'ratpoison' ? '7' : '5');
+    resolveDestination();
+    expectCommand(['window', '10', '--space', '3']); reply(null);
+    expectCommand(['query', '--windows', '--window', '10']); reply({ id: 10, space: 3 });
+    expectCommand(['query', '--spaces', '--space']); reply(space);
+    expectCommand(['space', '--focus', '3']); reply(null);
+    expectCommand(['query', '--spaces', '--space']); reply(remote);
+    expectCommand(['window', '--focus', '10']); reply(null);
+    refresh(remote); press('3'); expectCommand(['space', '3', '--layout', 'bsp']); reply(null); idle();
+}
+// Physical display identities survive arrangement-index changes; unplugged
+// displays stop the operation rather than targeting a newly numbered monitor.
+destinations('d'); press('4');
+const movedDisplay = { ...remote, display: 3, index: 6 };
+resolveDestination([space, movedDisplay], [displays[0], { ...displays[1], index: 3 }]);
+reply(space); expectCommand(['space', '--focus', '6']); reply(null); reply(movedDisplay);
+refresh(movedDisplay); press('escape'); idle();
+destinations('d'); press('4'); expectCommand(['query', '--displays']); reply([displays[0]]);
+assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
+// Space identity survives index changes while the chooser is open.
+destinations('u'); press('5');
+const renumbered = { ...desktop, index: 6 };
+reply([space, remote, renumbered]); reply(space);
+expectCommand(['space', '--focus', '6']); reply(null); reply(renumbered);
+refresh(renumbered); press('escape'); idle();
+// Move to a hidden virtual desktop; do not focus before asynchronous movement completes.
+destinations('m', { ...space, type: 'float' }); press('7'); resolveDestination();
+expectCommand(['window', '10', '--space', '4']); reply(null);
+reply({ id: 10, space: 2 });
+assert.equal(tasks.length, 0);
+const retry = [...timers.entries()].find(([id, callback]) => callback.delay === 0.1);
+assert.ok(retry); timers.delete(retry[0]); retry[1]();
+expectCommand(['query', '--windows', '--window', '10']); reply({ id: 10, space: 4 });
+reply(space); expectCommand(['space', '--focus', '4']); reply(null); reply(desktop);
+expectCommand(['window', '--focus', '10']); reply(null); refresh(desktop); press('escape'); idle();
+// An empty desktop can be selected, then its tiling mode changed without a window.
+destinations('u'); press('5'); resolveDestination(); reply(space); reply(null); reply(desktop);
+refresh(desktop, []); press('2'); expectCommand(['space', '4', '--layout', 'float']); reply(null); idle();
+// Moving within the current Space must skip the failing already-focused-space command.
+destinations('m', { ...space, type: 'float' }); press('0'); resolveDestination(); reply(null);
+reply({ id: 10, space: 2 }); reply(space);
+expectCommand(['window', '--focus', '10']); reply(null); refresh(); press('escape'); idle();
+// A removed destination, command failure or cancellation stops the chain.
+destinations('u'); press('5'); reply([space, remote]); assert.equal(tasks.length, 0);
+context.yabaiRatpoison.cancel(); idle();
+destinations('m', { ...space, type: 'float' }); press('5'); resolveDestination(); reply(null, 1);
+assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
+destinations('m'); press('7'); press('escape'); reply(displays); assert.equal(tasks.length, 0); idle();
+// Cancelling a pending completion poll prevents a later timer from focusing anything.
+destinations('m', { ...space, type: 'float' }); press('5'); resolveDestination(); reply(null); reply({ space: 2 });
+press('escape'); for (const callback of [...timers.values()]) callback(); timers.clear();
+assert.equal(tasks.length, 0); idle();
+// Completion polling is bounded and never follows a move that did not happen.
+destinations('m', { ...space, type: 'float' }); press('5'); resolveDestination(); reply(null);
+for (let attempt = 0; attempt < 30; ++attempt) {
+    expectCommand(['query', '--windows', '--window', '10']); reply({ id: 10, space: 2 });
+    if (attempt < 29) {
+        const id = Math.max(...timers.keys());
+        const callback = timers.get(id); timers.delete(id); callback();
+    }
+}
+assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
+open({ ...space, type: 'float' }, []); press('m', ['shift']); refresh({ ...space, type: 'float' }, []);
+assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 // Native rendering failure closes the session, with an explicit fallback error.
 open(); const [badId, badCallback] = [...renderers.entries()][0];
 renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle();
 // Retain the actual compact-menu payload for native rendering verification.
 fs.writeFileSync('/tmp/yabai-prefix-test-menu.json', JSON.stringify(lastMenu));
-console.log('Phoenix navigation, layout, pagination, and renderer lifecycle tests passed');
+console.log('Phoenix navigation, layout, display/Space moves, pagination, and renderer lifecycle tests passed');

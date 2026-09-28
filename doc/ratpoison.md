@@ -80,7 +80,9 @@ Press **Super-S (Command-S)**, release it, then choose:
 | `Shift-S` | Split horizontally (top/bottom) |
 | `Shift-V` | Split vertically (left/right) |
 | `Shift-F`, then a label | Select a frame, including empty frames |
-| `Shift-M`, then a label | Move the focused window to a frame |
+| `Shift-M`, then a label | Move to a frame, display, or Space; follow cross-Space moves |
+| `Shift-D`, then a label | Focus a physical display's visible Space |
+| `Shift-U`, then a label | Focus a virtual desktop (Space) |
 | `Tab` / `Shift-Tab` | Next / previous frame |
 | `Shift-R` | Remove selected frame |
 | `Shift-O` | Keep only selected frame, collecting its windows |
@@ -95,6 +97,35 @@ the menu. Choosing the already-active mode leaves its layout intact. Mode keys
 work in floating and BSP as well; the menu continues to list their windows.
 Floating-mode directional navigation chooses the nearest window centre in that
 direction; BSP uses yabai's existing managed-window navigation.
+
+### Displays and virtual desktops
+
+Display and Space containers are available in every layout. `Super-S`, then
+`Shift-M`, opens a destination list: local ratpoison frames first, followed by
+physical displays (`D`) and their virtual desktops (`S`). Each display entry
+represents its currently visible Space. Space entries also include desktops
+that are not currently visible; native fullscreen Spaces are excluded.
+Labels show the destination's current layout and any configured display/Space
+label. Use `[` and `]` to page through long destination lists.
+
+For example, to send a window to a floating external display and start tiling:
+
+1. Focus the window, press `Super-S`, then `Shift-M`.
+2. Choose the external display's `D` entry.
+3. After the window moves and receives focus there, press `1` for ratpoison,
+   `2` for floating, or `3` for BSP. The menu stays open after arrival.
+
+Moving to a ratpoison Space uses its selected frame; the source frame remains
+in place even when empty. Moving to another layout uses yabai's normal placement.
+`Shift-D` and `Shift-U` let you visit containers without moving a window, including
+empty desktops, then change their layout with the same number keys.
+
+Moves and Space switches use existing yabai commands and require the same macOS
+permissions as those commands. The menu waits for asynchronous completion before
+following focus or enabling destination layout controls. A failure stops the
+sequence and displays an error. Escape stops subsequent steps; a move already
+sent to yabai is not undone. Space and display indices are resolved again from their ids
+before acting; destination lists are refreshed each time the chooser opens.
 
 **Exiting ratpoison with Shift-T defaults to floating**, even if it was entered
 from BSP. Selecting `3` explicitly chooses BSP instead. Closing the prefix menu

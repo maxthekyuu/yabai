@@ -7,6 +7,7 @@ var yabaiRatpoison = (function () {
     var alphabet = '0456789abcdefgimnopqrstuvwxyz';
     var keys = [];
     var timer = null;
+    var transitionTimer = null;
     var modal = null;
     var rendererTask = null;
     var rendererGeneration = 0;
@@ -26,6 +27,8 @@ var yabaiRatpoison = (function () {
         clearKeys();
         if (timer !== null) Timer.off(timer);
         timer = null;
+        if (transitionTimer !== null) Timer.off(transitionTimer);
+        transitionTimer = null;
         closeMenu();
     }
 
@@ -164,6 +167,9 @@ var yabaiRatpoison = (function () {
         bind('t', ['shift'], function () {
             setLayout(space, space.type === 'ratpoison' ? 'float' : 'ratpoison');
         });
+        bind('m', ['shift'], function () { load('move'); });
+        bind('d', ['shift'], function () { load('displays'); });
+        bind('u', ['shift'], function () { load('spaces'); });
         if (space.type !== 'ratpoison') return;
         var args = ['space', String(space.index)];
         bind('s', ['shift'], function () { update(args.concat(['--split', 'horizontal'])); });
@@ -173,7 +179,6 @@ var yabaiRatpoison = (function () {
         bind('tab', [], function () { update(args.concat(['--focus-frame', 'next'])); });
         bind('tab', ['shift'], function () { update(args.concat(['--focus-frame', 'prev'])); });
         bind('f', ['shift'], function () { load('frames'); });
-        bind('m', ['shift'], function () { load('move'); });
     }
 
     function clean(text) {
@@ -198,7 +203,7 @@ var yabaiRatpoison = (function () {
         var columnWidth = Math.max(12, Math.min(68, Math.floor((screen.width - 100) / (columns * 8)) - 3));
         var width = columns * (columnWidth + 3) - 3;
         var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages, width),
-                     clip('1 ratpoison   2 floating   3 bsp', width), ''];
+                     clip('1 ratpoison   2 floating   3 bsp   Shift-T toggle', width), ''];
         var cells = visible.map(function (entry, index) {
             var key = alphabet[index];
             bind(key, [], function () { choose(entry); });
@@ -211,14 +216,137 @@ var yabaiRatpoison = (function () {
             if (cells[row + usedRows]) line = line.padEnd(columnWidth + 3, ' ') + cells[row + usedRows];
             lines.push(line);
         }
-        if (!cells.length) lines.push('(no windows)');
-        lines.push('', 'arrows/hjkl focus   [ ] page   Esc close', 'Shift-T toggle ratpoison / floating');
+        if (!cells.length) lines.push('(no choices)');
+        lines.push('', 'arrows/hjkl focus   [ ] page   Esc close', 'Shift-M move   Shift-D displays   Shift-U Spaces');
         if (space.type === 'ratpoison') {
-            lines.push('Shift-S/V split   Shift-F frames   Shift-M move', 'Shift-R remove    Shift-O only     Tab next');
+            lines.push('Shift-S/V split   Shift-F frames', 'Shift-R remove    Shift-O only     Tab next');
         }
         bind('[', [], function () { choices(entries, title, space, windows, choose, page - 1); });
         bind(']', [], function () { choices(entries, title, space, windows, choose, page + 1); });
         show(lines.map(function (line) { return clip(line, width); }).join('\n'));
+    }
+
+    // A display is a container whose destination is its currently visible Space.
+    // Neither the source nor destination needs to use ratpoison.
+    function destinations(mode, space, windows, current) {
+        var source = windows.filter(function (window) { return window['has-focus']; })[0];
+        if (mode === 'move' && !source) { error('no focused window to move'); return; }
+        run(['query', '--displays'], function (displayTask) {
+            if (!active || generation !== current) return;
+            var displays;
+            try { displays = JSON.parse(displayTask.output); } catch (_) {}
+            if (displayTask.status !== 0 || !Array.isArray(displays)) { error('display query failed'); return; }
+            run(['query', '--spaces'], function (spaceTask) {
+                if (!active || generation !== current) return;
+                var spaces;
+                try { spaces = JSON.parse(spaceTask.output); } catch (_) {}
+                if (spaceTask.status !== 0 || !Array.isArray(spaces)) { error('Space query failed'); return; }
+                var entries = [];
+                if (mode === 'move' && space.type === 'ratpoison') {
+                    (space.frames || []).forEach(function (frame) {
+                        entries.push({ frame: frame.id, label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
+                            (frame.windows.length ? ' [' + frame.windows.length + ' windows]' : ' [empty]') });
+                    });
+                }
+                displays.sort(function (a, b) { return a.index - b.index; }).forEach(function (display) {
+                    var desktops = spaces.filter(function (item) { return item.display === display.index; });
+                    var visible = desktops.filter(function (item) { return item['is-visible']; })[0];
+                    if (mode !== 'spaces' && visible && !visible['is-native-fullscreen']) {
+                        entries.push({ display: display.index, displayId: display.id, space: visible,
+                            label: (display['has-focus'] ? '*' : ' ') + ' D' + display.index +
+                                (display.label ? ' ' + clean(display.label) : '') +
+                                ' / S' + visible.index + ' [' + visible.type + ']' });
+                    }
+                    if (mode !== 'displays') {
+                        desktops.filter(function (item) { return !item['is-native-fullscreen']; })
+                            .sort(function (a, b) { return a.index - b.index; }).forEach(function (item) {
+                                entries.push({ space: item, label: (item['has-focus'] ? '*' : ' ') +
+                                    ' D' + display.index + ' / S' + item.index +
+                                    (item.label ? ' ' + clean(item.label) : '') + ' [' + item.type + ']' });
+                            });
+                    }
+                });
+                choices(entries, mode === 'move' ? 'move + follow' : 'focus ' + mode, space, windows, function (entry) {
+                    if (entry.frame !== undefined) {
+                        update(['window', String(source.id), '--frame', String(entry.frame)]);
+                    } else {
+                        visit(entry, mode === 'move' ? source : null);
+                    }
+                }, 0);
+            });
+        });
+    }
+
+    function visit(entry, source) {
+        var current = ++generation;
+        clearKeys();
+        bind('escape', [], cancel);
+        show(source ? 'Moving window and following…  |  Esc close' : 'Changing container…  |  Esc close');
+        function valid() { return active && generation === current; }
+        function request(args, callback) {
+            run(args, function (task) {
+                if (!valid()) return;
+                if (task.status !== 0) { error(task.error || task.output || 'command failed'); return; }
+                callback(task);
+            });
+        }
+        // WindowServer moves and gesture-based Space switches are asynchronous.
+        // Verify completion before focusing or exposing destination layout keys.
+        function waitFor(args, matches, done, attempts) {
+            request(args, function (task) {
+                var value;
+                try { value = JSON.parse(task.output); } catch (_) { error('invalid destination query response'); return; }
+                if (matches(value)) { done(value); return; }
+                if (attempts <= 1) { error('destination did not become available; check the window and Space'); return; }
+                transitionTimer = Timer.after(0.1, function () {
+                    transitionTimer = null;
+                    if (valid()) waitFor(args, matches, done, attempts - 1);
+                });
+            });
+        }
+        // Resolve Space ids again, because Mission Control indices can change
+        // while the chooser is open. Displays resolve their visible Space anew.
+        function resolveSpace() {
+            request(['query', '--spaces'], function (task) {
+                var spaces;
+                try { spaces = JSON.parse(task.output); } catch (_) {}
+                if (!Array.isArray(spaces)) { error('invalid Space list'); return; }
+                var target = spaces.filter(function (item) {
+                    return entry.display !== undefined ? item.display === entry.display && item['is-visible']
+                                                       : item.id === entry.space.id;
+                })[0];
+                if (!target || target['is-native-fullscreen']) { error('destination is no longer available'); return; }
+                function focusWindow() {
+                    if (source) request(['window', '--focus', String(source.id)], function () { load('windows'); });
+                    else load('windows');
+                }
+                function focusSpace() {
+                    request(['query', '--spaces', '--space'], function (task) {
+                        var focused;
+                        try { focused = JSON.parse(task.output); } catch (_) { error('invalid focused Space'); return; }
+                        if (focused.id === target.id) { focusWindow(); return; }
+                        request(['space', '--focus', String(target.index)], function () {
+                            waitFor(['query', '--spaces', '--space'], function (item) { return item && item.id === target.id; }, focusWindow, 30);
+                        });
+                    });
+                }
+                if (!source) { focusSpace(); return; }
+                request(['window', String(source.id), '--space', String(target.index)], function () {
+                    waitFor(['query', '--windows', '--window', String(source.id)], function (window) {
+                        return window && window.space === target.index;
+                    }, focusSpace, 30);
+                });
+            });
+        }
+        if (entry.display === undefined) { resolveSpace(); return; }
+        request(['query', '--displays'], function (task) {
+            var displays;
+            try { displays = JSON.parse(task.output); } catch (_) {}
+            var display = Array.isArray(displays) && displays.filter(function (item) { return item.id === entry.displayId; })[0];
+            if (!display) { error('display is no longer available'); return; }
+            entry.display = display.index;
+            resolveSpace();
+        });
     }
 
     function load(mode) {
@@ -247,6 +375,10 @@ var yabaiRatpoison = (function () {
                     var direction = queuedDirection;
                     queuedDirection = null;
                     if (navigate(space, windows, direction)) return;
+                }
+                if (mode === 'move' || mode === 'displays' || mode === 'spaces') {
+                    destinations(mode, space, windows, current);
+                    return;
                 }
                 var byId = {};
                 windows.forEach(function (window) { byId[window.id] = window; });
@@ -286,15 +418,12 @@ var yabaiRatpoison = (function () {
                         else command(['window', '--focus', String(entry.id)]);
                     }, 0);
                 } else {
-                    var source = windows.filter(function (window) { return window['has-focus']; })[0];
-                    if (mode === 'move' && !source) { error('no focused window to move'); return; }
                     choices(frames.map(function (frame) {
                         return { id: frame.id, label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
                             (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') };
-                    }), mode === 'move' ? 'move to frame' : 'select frame', space, windows,
+                    }), 'select frame', space, windows,
                     function (entry) {
-                        update(mode === 'move' ? ['window', String(source.id), '--frame', String(entry.id)]
-                               : ['space', String(space.index), '--focus-frame', String(entry.id)]);
+                        update(['space', String(space.index), '--focus-frame', String(entry.id)]);
                     }, 0);
                 }
             });
