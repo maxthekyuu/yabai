@@ -190,6 +190,11 @@ var yabaiRatpoison = (function () {
         return chars.length <= width ? chars.join('') : chars.slice(0, Math.max(0, width - 1)).join('') + '…';
     }
 
+    // Frame queries expose geometry directly; window/display queries nest it.
+    function frameRect(frame) {
+        return { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
+    }
+
     function choices(entries, title, space, windows, choose, page) {
         clearKeys();
         controls(space, windows);
@@ -273,7 +278,7 @@ var yabaiRatpoison = (function () {
                 var entries = [];
                 if (mode === 'move' && space.type === 'ratpoison') {
                     (space.frames || []).forEach(function (frame) {
-                        entries.push({ frame: frame.id, rect: frame.frame, label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
+                        entries.push({ frame: frame.id, rect: frameRect(frame), label: (frame.selected ? '*' : ' ') + ' F' + frame.id +
                             (frame.windows.length ? ' [' + frame.windows.length + ' windows]' : ' [empty]') });
                     });
                 }
@@ -430,16 +435,16 @@ var yabaiRatpoison = (function () {
                         frames.forEach(function (frame) {
                             var label = (local && frame.selected ? '*' : ' ') + ' F' + frame.id;
                             if (mode === 'frames' || !frame.windows.length) {
-                                add({ frame: frame.id, rect: frame.frame, label: label + (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') });
+                                add({ frame: frame.id, rect: frameRect(frame), label: label + (frame.windows.length ? ' ' + name(frame['active-window']) : ' [empty]') });
                             } else {
                                 var id = frame['active-window'] || frame.windows[0];
-                                add({ window: id, rect: frame.frame, label: label + ' ' + name(id) });
+                                add({ window: id, rect: frameRect(frame), label: label + ' ' + name(id) });
                             }
                         });
                         if (mode !== 'frames') frames.forEach(function (frame) {
                             var front = frame['active-window'] || frame.windows[0];
                             frame.windows.forEach(function (id) {
-                                if (id !== front) add({ window: id, rect: frame.frame, label: '  F' + frame.id + ' ' + name(id) }, true);
+                                if (id !== front) add({ window: id, rect: frameRect(frame), label: '  F' + frame.id + ' ' + name(id) }, true);
                             });
                         });
                         if (mode !== 'frames') {

@@ -57,8 +57,8 @@ function reply(value, status = 0) {
 function expectCommand(args) { assert.deepEqual(Array.from(tasks[0].args), ['-m', ...args]); }
 function idle() { assert.equal(keys.size, 1); assert.equal(renderers.size, 0); }
 const space = { id: 102, display: 1, 'is-visible': true, 'has-focus': true, index: 2, type: 'ratpoison', frames: [
-    { id: 0, selected: true, windows: [10, 20], 'active-window': 10 },
-    { id: 7, selected: false, windows: [], 'active-window': 0 }
+    { id: 0, x: 0, y: 38, w: 500, h: 800, selected: true, windows: [10, 20], 'active-window': 10 },
+    { id: 7, x: 500, y: 38, w: 500, h: 800, selected: false, windows: [], 'active-window': 0 }
 ] };
 const windows = [{ id: 10, app: 'Terminal', title: 'One', 'has-focus': true, frame: { x: 0, y: 0, w: 100, h: 100 } },
                  { id: 20, app: 'Editor', title: 'Two', 'has-focus': false, frame: { x: 200, y: 0, w: 100, h: 100 } }];
@@ -282,15 +282,22 @@ press('4'); expectCommand(['window', '--focus', '30']); reply(null); idle();
 // Labels use existing frame/window geometry and exactly the current page's keys.
 const badgeRect = { x: -900, y: -100, w: 400, h: 300 };
 const badgeSpace = { ...space, frames: [
-    { id: 0, selected: true, windows: [10, 20], 'active-window': 10, frame: badgeRect },
-    { id: 7, windows: [], frame: { x: -500, y: -100, w: 400, h: 300 } }
+    { id: 0, x: 0, y: 38, w: 500, h: 800, selected: true, windows: [10, 20], 'active-window': 10, ...badgeRect },
+    { id: 7, windows: [], x: -500, y: -100, w: 400, h: 300 }
 ] };
 open(badgeSpace);
 assert.deepEqual(Array.from(lastMenu.badges, b => b.key), ['0', '4', '5']);
-assert.equal(lastMenu.badges[0].rect.x, -900);
+assert.deepEqual(JSON.parse(JSON.stringify(lastMenu.badges[0].rect)), badgeRect);
+assert.equal(lastMenu.badges[2].rect.x, -900); // Covered window shares the frame center.
 assert.equal(lastMenu.badges[1].rect.x, -500);
 assert.equal(tasks.length, 0); // No additional geometry query for frames.
 assert.equal(renderers.size, 1); // Menu and all badges share one process.
+press('escape'); idle();
+open(badgeSpace); press('f', ['shift']); refresh(badgeSpace);
+assert.deepEqual(Array.from(lastMenu.badges, b => b.rect.x), [-900, -500]);
+press('escape'); idle();
+open(badgeSpace); press('m', ['shift']); refresh(badgeSpace); reply(displays); reply(desktops);
+assert.deepEqual(Array.from(lastMenu.badges.slice(0, 2), b => b.rect.x), [-900, -500]);
 press('escape'); idle();
 open({ ...space, type: 'float' });
 assert.equal(lastMenu.badges[0].rect.x, windows[0].frame.x); press('escape'); idle();
