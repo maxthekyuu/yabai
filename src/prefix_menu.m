@@ -166,12 +166,17 @@ static NSArray *hint_layout(id badges, NSFont *font)
         NSDictionary *rect = badge[@"rect"];
         if (![key isKindOfClass:NSString.class] || key.length != 1 ||
             [@"0456789abcdefgimnopqrstuvwxyz" rangeOfString:key].location == NSNotFound ||
-            ![rect isKindOfClass:NSDictionary.class] || ![badge[@"display"] isKindOfClass:NSNumber.class]) return nil;
+            ![badge[@"display"] isKindOfClass:NSNumber.class]) return nil;
+        // Display reconfiguration can temporarily invalidate individual window
+        // or frame rectangles. Hints are optional: preserve the chooser and
+        // other labels instead of failing the entire renderer.
+        if (![rect isKindOfClass:NSDictionary.class]) continue;
+        BOOL valid = YES;
         for (NSString *field in @[@"x", @"y", @"w", @"h"]) {
             if (![rect[field] isKindOfClass:NSNumber.class] || !isfinite([rect[field] doubleValue]) ||
-                fabs([rect[field] doubleValue]) > 1000000) return nil;
+                fabs([rect[field] doubleValue]) > 1000000) { valid = NO; break; }
         }
-        if ([rect[@"w"] doubleValue] <= 0 || [rect[@"h"] doubleValue] <= 0) return nil;
+        if (!valid || [rect[@"w"] doubleValue] <= 0 || [rect[@"h"] doubleValue] <= 0) continue;
         CGFloat x = [rect[@"x"] doubleValue] + [rect[@"w"] doubleValue] / 2;
         CGFloat y = primaryHeight - [rect[@"y"] doubleValue] - [rect[@"h"] doubleValue] / 2;
         // Stacked windows share a center. Show their keys together instead of

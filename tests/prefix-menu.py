@@ -110,6 +110,21 @@ class PrefixMenuTests(unittest.TestCase):
         self.assertLess(first['width'], 100)
         self.assertLess(first['height'], 40)
 
+    def test_transient_hint_geometry(self):
+        good = {'x': 0, 'y': 0, 'w': 200, 'h': 100}
+        stale = [dict(good, w=0), dict(good, h=-1), dict(good, x=None),
+                 dict(good, y=1000001), {}, None]
+        for rect in stale:
+            metrics = self.render('prefix-transient.png', 'YABAI\n0 good 4 transitioning',
+                                  {'x': 0, 'y': 0, 'width': 1440, 'height': 900}, badges=[
+                                      {'key': '0', 'display': 1, 'rect': good},
+                                      {'key': '4', 'display': 2, 'rect': rect}])
+            self.assertEqual([b['keys'] for b in metrics['badges']], ['0'])
+        # A bad rectangle must not prevent searching or selecting that window.
+        state = self.search([{'index': 0, 'display': 1, 'label': 'Editor',
+                              'text': 'Editor', 'rect': dict(good, w=0)}])
+        self.assertEqual(state['indices'], [0])
+
     def search(self, entries, query='', selected=0):
         OUTPUT.mkdir(exist_ok=True)
         payload = {'text': 'Window search', 'search': entries, 'query': query, 'selected': selected,
