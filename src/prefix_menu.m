@@ -81,7 +81,9 @@ static BOOL configure_theme(id theme)
         else if ([line hasPrefix:@"Page "]) color = theme_color(@"status", 0xaaaaaa);
         else if ([line hasPrefix:@"Shift-"] || [line hasPrefix:@"["] || [line hasPrefix:@"hjkl/"] ||
                  [line hasPrefix:@"Type "] || [line hasPrefix:@"Tab:"] || [line hasPrefix:@"Esc "]) color = theme_color(@"help", 0xaaaaaa);
-        BOOL selected = [line hasPrefix:@"│ > "];
+        // Whole-row highlighting is only the fallback for single-column search.
+        // Chooser selections provide exact cell ranges, including sparse last rows.
+        BOOL selected = !self.selections.count && [line hasPrefix:@"│ > "];
         NSFont *font = self.font;
         if (selected) {
             [theme_color(@"selectionBackground", 0x004444) setFill];

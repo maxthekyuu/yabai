@@ -203,6 +203,13 @@ class PrefixMenuTests(unittest.TestCase):
         self.render('prefix-themed.png', 'Window search\n/ editor\n\n│ > 0 Editor: notes │\nPage 1/1',
                     {'x': 0, 'y': 0, 'width': 1400, 'height': 1000}, theme=theme)
 
+    def test_sparse_row_highlight_stays_in_selected_column(self):
+        OUTPUT.mkdir(exist_ok=True)
+        binary = OUTPUT / 'prefix-selection-test'
+        subprocess.run(['xcrun', 'clang', str(ROOT / 'tests/prefix-selection.m'), '-fobjc-arc',
+                        '-Wno-unused-parameter', '-framework', 'Cocoa', '-o', str(binary)], check=True, capture_output=True)
+        subprocess.run([str(binary)], check=True, capture_output=True)
+
     def test_selected_cell_range(self):
         text = 'YABAI  ratpoison\nr ratpoison f floating b bsp\n\n│ 0 S1 (1) W0 Terminal    > 4 S1 (1) W1 Editor    │'
         row = text.split('\n')[-1]
