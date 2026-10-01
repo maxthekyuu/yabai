@@ -114,7 +114,7 @@ class PrefixMenuTests(unittest.TestCase):
 
     def test_hint_coordinates_and_stacks(self):
         badges = [
-            {'key': '0', 'display': 1, 'rect': {'x': 0, 'y': 0, 'w': 200, 'h': 100}},
+            {'key': '0', 'state':'focused', 'display': 1, 'rect': {'x': 0, 'y': 0, 'w': 200, 'h': 100}},
             {'key': '4', 'display': 1, 'rect': {'x': 0, 'y': 0, 'w': 200, 'h': 100}},
             {'key': '5', 'display': 2, 'rect': {'x': -1000, 'y': -300, 'w': 400, 'h': 200}},
         ]
@@ -122,6 +122,7 @@ class PrefixMenuTests(unittest.TestCase):
                               {'x': 0, 'y': 0, 'width': 1440, 'height': 900}, badges=badges)
         first, second = metrics['badges']
         self.assertEqual(first['keys'], '0 4')
+        self.assertEqual(first['states'], ['focused', 'normal'])
         self.assertEqual(first['cx'], 100)
         self.assertEqual(second['cx'], -800)
         self.assertEqual(second['cy'] - first['cy'], 250)

@@ -473,3 +473,10 @@ The current selected frame's `F<number>` label is red, including within the
 selected entry's background highlight. Other frame labels retain their usual
 colors. Change `prefix.colors.selectedFrameNumber` through Shift-C to customize
 the red. This indicator does not depend on bold or italic font support.
+
+Overlay shortcut labels use yellow bold text for each frame's front-most window
+and red bold italic text for the actually focused window. Covered stack keys
+retain the display color and regular font, even when grouped into the same badge.
+Missing font traits are synthesized. Configure `prefix.colors.hintFront` and
+`prefix.colors.hintFocused` through Shift-C; these override the general hint text
+color for emphasized keys.

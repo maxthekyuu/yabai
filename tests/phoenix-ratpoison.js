@@ -553,3 +553,13 @@ press('c',['shift']); reply({theme:{}});
 press('s',['cmd']); refresh(); assert.equal(lastMenu.theme.colors.hintText,undefined);
 press('escape'); idle();
 console.log('Stable per-Space window numbers, selected cells, and configuration integration tests passed');
+
+// Overlay keys distinguish the actual focused window, each frame's front,
+// and covered stack entries, even when their labels share one rectangle.
+const overlaySpace = {...space, frames:[space.frames[0], {...space.frames[1], windows:[30], 'active-window':30}]};
+const overlayWindows = windows.concat([{id:30, app:'Browser',title:'Front','has-focus':false,frame:windows[0].frame}]);
+open(overlaySpace, overlayWindows);
+assert.equal(lastMenu.badges.find(b => b.key === '0').state, 'focused');
+assert.equal(lastMenu.badges.find(b => b.key === '1').state, 'normal');
+assert.equal(lastMenu.badges.find(b => b.key === '2').state, 'front');
+press('escape'); idle();

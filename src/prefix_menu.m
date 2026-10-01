@@ -155,8 +155,29 @@ static BOOL configure_theme(id theme)
 - (BOOL)canBecomeMainWindow { return NO; }
 @end
 
+static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSFont *font, NSColor *color)
+{
+    NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:keys attributes:@{
+        NSFontAttributeName:font, NSForegroundColorAttributeName:menu_theme[@"colors"][@"hintText"] ? theme_color(@"hintText", 0) : color }];
+    for (NSUInteger i = 0; i < states.count; ++i) {
+        NSString *state = states[i];
+        if ([state isEqual:@"normal"]) continue;
+        BOOL focused = [state isEqual:@"focused"];
+        NSFontTraitMask wanted = NSBoldFontMask | (focused ? NSItalicFontMask : 0);
+        NSFont *styled = [[NSFontManager sharedFontManager] convertFont:font toHaveTrait:wanted];
+        NSFontTraitMask actual = [[NSFontManager sharedFontManager] traitsOfFont:styled];
+        NSMutableDictionary *attributes = [@{NSFontAttributeName:styled,
+            NSForegroundColorAttributeName:theme_color(focused ? @"hintFocused" : @"hintFront", focused ? 0xff5555 : 0xffff55)} mutableCopy];
+        if (!(actual & NSBoldFontMask)) attributes[NSStrokeWidthAttributeName] = @-2;
+        if (focused && !(actual & NSItalicFontMask)) attributes[NSObliquenessAttributeName] = @0.2;
+        if (i * 2 < keys.length) [text addAttributes:attributes range:NSMakeRange(i * 2, 1)];
+    }
+    return text;
+}
+
 @interface PrefixHintView : NSView
 @property(nonatomic, strong) NSString *keys;
+@property(nonatomic, strong) NSArray *states;
 @property(nonatomic, strong) NSFont *font;
 @property(nonatomic, strong) NSColor *color;
 @end
@@ -170,10 +191,10 @@ static BOOL configure_theme(id theme)
     NSBezierPath *outline = [NSBezierPath bezierPathWithRect:NSInsetRect(self.bounds, 1, 1)];
     outline.lineWidth = 2;
     [outline stroke];
-    NSDictionary *attributes = @{ NSFontAttributeName: self.font, NSForegroundColorAttributeName: menu_theme[@"colors"][@"hintText"] ? theme_color(@"hintText", 0) : self.color };
-    NSSize size = [self.keys sizeWithAttributes:attributes];
-    [self.keys drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2,
-                                      (self.bounds.size.height - size.height) / 2) withAttributes:attributes];
+    NSAttributedString *text = hint_text(self.keys, self.states, self.font, self.color);
+    NSSize size = text.size;
+    [text drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2,
+                                 (self.bounds.size.height - size.height) / 2)];
 }
 @end
 
@@ -187,6 +208,8 @@ static NSArray *hint_layout(id badges, NSFont *font)
     CGFloat primaryHeight = CGDisplayBounds(CGMainDisplayID()).size.height;
     for (id badge in badges) {
         if (![badge isKindOfClass:NSDictionary.class]) return nil;
+        NSString *state = badge[@"state"] ?: @"normal";
+        if (![@[@"normal", @"front", @"focused"] containsObject:state]) return nil;
         NSString *key = badge[@"key"];
         NSDictionary *rect = badge[@"rect"];
         if (![key isKindOfClass:NSString.class] || key.length != 1 ||
@@ -210,11 +233,13 @@ static NSArray *hint_layout(id badges, NSFont *font)
         for (NSMutableDictionary *group in groups) {
             if (fabs([group[@"cx"] doubleValue] - x) < 1 && fabs([group[@"cy"] doubleValue] - y) < 1) { match = group; break; }
         }
-        if (match) match[@"keys"] = [match[@"keys"] stringByAppendingFormat:@" %@", key];
-        else [groups addObject:[@{ @"keys":key, @"cx":@(x), @"cy":@(y), @"display":badge[@"display"] } mutableCopy]];
+        if (match) {
+            match[@"keys"] = [match[@"keys"] stringByAppendingFormat:@" %@", key];
+            [match[@"states"] addObject:state];
+        } else [groups addObject:[@{ @"keys":key, @"states":[NSMutableArray arrayWithObject:state], @"cx":@(x), @"cy":@(y), @"display":badge[@"display"] } mutableCopy]];
     }
     for (NSMutableDictionary *group in groups) {
-        NSSize text = [group[@"keys"] sizeWithAttributes:@{ NSFontAttributeName:font }];
+        NSSize text = hint_text(group[@"keys"], group[@"states"], font, display_color([group[@"display"] unsignedIntegerValue])).size;
         CGFloat width = MAX(28, ceil(text.width) + 16), height = MAX(28, ceil(text.height) + 10);
         group[@"x"] = @([group[@"cx"] doubleValue] - width / 2);
         group[@"y"] = @([group[@"cy"] doubleValue] - height / 2);
@@ -226,7 +251,7 @@ static NSArray *hint_layout(id badges, NSFont *font)
 static PrefixHintView *hint_view(NSDictionary *hint, NSFont *font)
 {
     PrefixHintView *view = [[PrefixHintView alloc] initWithFrame:NSMakeRect(0, 0, [hint[@"width"] doubleValue], [hint[@"height"] doubleValue])];
-    view.font = font; view.keys = hint[@"keys"];
+    view.font = font; view.keys = hint[@"keys"]; view.states = hint[@"states"];
     NSUInteger display = [hint[@"display"] unsignedIntegerValue];
     view.color = display_color(display);
     return view;
@@ -240,7 +265,7 @@ static BOOL search_entries_valid(id entries)
         if (![entry isKindOfClass:NSDictionary.class] || ![entry[@"label"] isKindOfClass:NSString.class] ||
             ![entry[@"text"] isKindOfClass:NSString.class] || ![entry[@"index"] isKindOfClass:NSNumber.class] ||
             ![entry[@"display"] isKindOfClass:NSNumber.class] || [entry[@"display"] integerValue] < 1) return NO;
-        if (entry[@"rect"] && !hint_layout(@[@{ @"key":@"0", @"rect":entry[@"rect"], @"display":entry[@"display"] }],
+        if (entry[@"rect"] && !hint_layout(@[@{ @"key":@"0", @"rect":entry[@"rect"], @"display":entry[@"display"], @"state":entry[@"state"] ?: @"normal" }],
                                             (menu_font ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]))) return NO;
     }
     return YES;
@@ -295,7 +320,7 @@ static NSDictionary *search_layout(NSArray *entries, NSString *query, NSInteger 
         if (label.length > (NSUInteger)(columns - 4)) label = [[label substringToIndex:columns - 5] stringByAppendingString:@"…"];
         [lines addObject:[NSString stringWithFormat:@"│ %@ │", [label stringByPaddingToLength:columns - 4 withString:@" " startingAtIndex:0]]];
         [indices addObject:entry[@"index"]];
-        if (entry[@"rect"]) [badges addObject:@{ @"key":key, @"rect":entry[@"rect"], @"display":@(display) }];
+        if (entry[@"rect"]) [badges addObject:@{ @"key":key, @"rect":entry[@"rect"], @"display":@(display), @"state":entry[@"state"] ?: @"normal" }];
     }
     if (display != -1) { [lines addObject:bottom]; [groups addObject:@{ @"start":@(start), @"end":@(lines.count - 1), @"display":@(display) }]; }
     if (!matches.count) [lines addObject:@"No matching windows"];

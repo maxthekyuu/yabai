@@ -319,13 +319,14 @@ var yabaiRatpoison = (function () {
                     var rect = space['is-visible'] && !window['is-minimized'] && !window['is-hidden']
                              ? (owner ? frameRect(owner) : window.frame) : undefined;
                     results.push({ window: window.id, space: space, rect: rect, text: text, pid: window.pid,
+                        hintState: window['has-focus'] ? 'focused' : (!owner || (owner['active-window'] || owner.windows[0]) === window.id ? 'front' : 'normal'),
                         minimized: window['is-minimized'], hidden: window['is-hidden'], searchable: true,
                         label: 'S' + space.index + ' (' + space.display + ') W' + numbersBySpace[space.id][window.id] + ' ' + text +
                                (window['is-minimized'] ? ' [minimized]' : window['is-hidden'] ? ' [hidden]' : '') });
                 });
                 var search = results.map(function (entry, index) {
                     return { index: index, label: entry.label, text: entry.text, display: entry.space.display,
-                             rect: entry.rect, pid: entry.pid, hidden: entry.hidden };
+                             rect: entry.rect, pid: entry.pid, hidden: entry.hidden, state: entry.hintState };
                 });
                 show('Window search', null, [], [], search, function (index) {
                     var entry = results[index];
@@ -466,7 +467,7 @@ var yabaiRatpoison = (function () {
                 ++hint;
                 bind(key, [], function () { choose(entry); });
                 if (entry.rect && (!entry.space || entry.space.id === space.id || entry.space['is-visible'])) {
-                    badges.push({ key: key, rect: entry.rect, display: group.display });
+                    badges.push({ key: key, rect: entry.rect, display: group.display, state: entry.hintState || "normal" });
                 }
                 return clip((entry.selected ? '> ' : '  ') + key + ' ' + entry.label, columnWidth);
             });
@@ -719,8 +720,13 @@ var yabaiRatpoison = (function () {
                             entry.label = 'W' + entry.number + ' ' + entry.label;
                             var owner = (item.frames || []).filter(function (frame) { return frame.windows.indexOf(entry.window) !== -1; })[0];
                             entry.selected = local && (owner ? owner.selected && owner['active-window'] === entry.window : byId[entry.window] && byId[entry.window]['has-focus']);
+                            entry.hintState = byId[entry.window] && byId[entry.window]['has-focus'] ? 'focused' :
+                                (!owner || (owner['active-window'] || owner.windows[0]) === entry.window ? 'front' : 'normal');
                         } else if (entry.frame !== undefined) {
                             entry.selected = local && (item.frames || []).some(function (frame) { return frame.id === entry.frame && frame.selected; });
+                            var frame = (item.frames || []).filter(function (frame) { return frame.id === entry.frame; })[0];
+                            var front = frame && byId[frame['active-window'] || frame.windows[0]];
+                            entry.hintState = front ? (front['has-focus'] ? 'focused' : 'front') : 'normal';
                         }
                         entry.label = prefix + entry.label;
                         (background ? covered : entries).push(entry);
