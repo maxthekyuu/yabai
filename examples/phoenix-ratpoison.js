@@ -27,6 +27,7 @@ var yabaiRatpoison = (function () {
     var searching = false;
     var generation = 0;
     var queuedDirection = null;
+    var borderColors = { active: "#55ff55", inactive: "#555555", empty: "#5555ff" };
 
     function clearKeys() {
         keys.forEach(function (key) { Key.off(key); });
@@ -474,9 +475,12 @@ var yabaiRatpoison = (function () {
             for (var row = 0; row < usedRows; ++row) {
                 var line = cells[row];
                 if (cells[row + usedRows]) line = line.padEnd(columnWidth + 3, ' ') + cells[row + usedRows];
-                if (group.entries[row].selected) selections.push({ line: lines.length, start: 2, length: cells[row].length });
-                if (group.entries[row + usedRows] && group.entries[row + usedRows].selected)
-                    selections.push({ line: lines.length, start: 2 + columnWidth + 3, length: cells[row + usedRows].length });
+                [row, row + usedRows].forEach(function (index, column) {
+                    var entry = group.entries[index];
+                    if (!entry || (!entry.selected && !entry.frontColor)) return;
+                    selections.push({ line: lines.length, start: 2 + column * (columnWidth + 3), length: cells[index].length,
+                        emphasisOnly: !entry.selected, foreground: entry.frontColor });
+                });
                 lines.push('│ ' + line.padEnd(width - 4, ' ') + ' │');
             }
             lines.push('└' + '─'.repeat(width - 2) + '┘');
@@ -719,8 +723,12 @@ var yabaiRatpoison = (function () {
                             entry.label = 'W' + entry.number + ' ' + entry.label;
                             var owner = (item.frames || []).filter(function (frame) { return frame.windows.indexOf(entry.window) !== -1; })[0];
                             entry.selected = local && (owner ? owner.selected && owner['active-window'] === entry.window : byId[entry.window] && byId[entry.window]['has-focus']);
+                            if (owner && (owner['active-window'] || owner.windows[0]) === entry.window)
+                                entry.frontColor = borderColors[entry.selected ? 'active' : 'inactive'];
                         } else if (entry.frame !== undefined) {
                             entry.selected = local && (item.frames || []).some(function (frame) { return frame.id === entry.frame && frame.selected; });
+                            var frame = (item.frames || []).filter(function (frame) { return frame.id === entry.frame; })[0];
+                            if (frame) entry.frontColor = borderColors[entry.selected ? (frame.windows.length ? 'active' : 'empty') : 'inactive'];
                         }
                         entry.label = prefix + entry.label;
                         (background ? covered : entries).push(entry);
@@ -853,7 +861,17 @@ var yabaiRatpoison = (function () {
         if (active) { cancel(); return; }
         if (typeof hintsActive !== 'undefined' && hintsActive && typeof cancelHints === 'function') cancelHints();
         active = true;
-        load('windows');
+        var current = ++generation, pending = 3;
+        bind('escape', [], cancel);
+        [['active', 'active_frame_border_color'], ['inactive', 'inactive_frame_border_color'],
+         ['empty', 'selected_empty_border_color']].forEach(function (setting) {
+            run(['config', setting[1]], function (task) {
+                if (!active || generation !== current) return;
+                var color = (task.output || '').trim();
+                if (task.status === 0 && /^0x[0-9a-f]{8}$/i.test(color)) borderColors[setting[0]] = '#' + color.slice(-6);
+                if (--pending === 0) load('windows');
+            });
+        });
     }
 
     Task.run('/usr/bin/python3', [settingsBackend, 'theme'], function (task) {

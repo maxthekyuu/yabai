@@ -128,11 +128,19 @@ static BOOL configure_theme(id theme)
             NSDictionary *metrics = @{NSFontAttributeName:self.font};
             CGFloat left = [[line substringToIndex:range.location] sizeWithAttributes:metrics].width;
             CGFloat width = [[line substringWithRange:range] sizeWithAttributes:metrics].width;
-            [theme_color(@"selectionBackground", 0x004444) setFill];
-            NSRectFill(NSMakeRect(14 + left, y, width, self.lineHeight));
-            NSFont *selectedFont = [menu_theme[@"selectionWeight"] isEqual:@"regular"] ? self.font :
+            if (![selection[@"emphasisOnly"] boolValue]) {
+                [theme_color(@"selectionBackground", 0x004444) setFill];
+                NSRectFill(NSMakeRect(14 + left, y, width, self.lineHeight));
+            }
+            NSFont *selectedFont = !selection[@"foreground"] && [menu_theme[@"selectionWeight"] isEqual:@"regular"] ? self.font :
                 [[NSFontManager sharedFontManager] convertFont:self.font toHaveTrait:NSBoldFontMask];
-            [text addAttributes:@{NSFontAttributeName:selectedFont, NSForegroundColorAttributeName:theme_color(@"selectionText", 0xffffff)} range:range];
+            NSColor *foreground = theme_color(@"selectionText", 0xffffff);
+            if (selection[@"foreground"]) {
+                unsigned rgb = 0;
+                [[NSScanner scannerWithString:[selection[@"foreground"] substringFromIndex:1]] scanHexInt:&rgb];
+                foreground = terminal_color(rgb);
+            }
+            [text addAttributes:@{NSFontAttributeName:selectedFont, NSForegroundColorAttributeName:foreground} range:range];
         }
         [text drawAtPoint:NSMakePoint(14, y)];
         [NSGraphicsContext restoreGraphicsState];
@@ -496,6 +504,10 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
                     [value doubleValue] < 0 || [value doubleValue] > 1000000 || [value doubleValue] != [value unsignedIntegerValue]) {
                     fprintf(stderr, "invalid selection range\n"); return 1;
                 }
+            }
+            if ((selection[@"foreground"] && !theme_hex_valid(selection[@"foreground"])) ||
+                (selection[@"emphasisOnly"] && ![selection[@"emphasisOnly"] isKindOfClass:NSNumber.class])) {
+                fprintf(stderr, "invalid entry emphasis\n"); return 1;
             }
             NSUInteger row = [selection[@"line"] unsignedIntegerValue], start = [selection[@"start"] unsignedIntegerValue], length = [selection[@"length"] unsignedIntegerValue];
             if (row >= lines.count || !length || start + length > [lines[row] length]) { fprintf(stderr, "selection range outside text\n"); return 1; }

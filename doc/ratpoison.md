@@ -468,3 +468,11 @@ frame, select an empty frame and launch a window, move a window, minimize/restor
 and close the last window in a frame, switch Spaces/displays, and switch back to
 BSP/float. Applications can enforce minimum window sizes, as with existing yabai
 layouts.
+
+The chooser renders each frame's front-most window in bold, using
+`active_frame_border_color` for the selected frame and
+`inactive_frame_border_color` for other frames. Covered stack entries stay plain.
+Selected empty frames use `selected_empty_border_color`. Border colors are read
+when opening the prefix menu; the selected entry also retains its cell-sized
+background highlight. Stack cycling updates the emphasis without changing window
+numbers.
