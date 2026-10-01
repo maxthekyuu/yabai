@@ -61,6 +61,7 @@ static BOOL configure_theme(id theme)
 @property(nonatomic, strong) NSArray<NSString *> *lines;
 @property(nonatomic, strong) NSFont *font;
 @property(nonatomic, strong) NSArray *groups;
+@property(nonatomic, strong) NSArray *selections;
 @property(nonatomic) CGFloat lineHeight;
 @end
 
@@ -116,6 +117,21 @@ static BOOL configure_theme(id theme)
                 [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(line.length - 1, 1)];
             }
         }
+        // Explicit UTF-16 cell ranges distinguish the selected entry from its
+        // neighbour in a two-column chooser. Frame markers alone are ambiguous.
+        for (NSDictionary *selection in self.selections) {
+            if ([selection[@"line"] unsignedIntegerValue] != i) continue;
+            NSRange range = NSMakeRange([selection[@"start"] unsignedIntegerValue], [selection[@"length"] unsignedIntegerValue]);
+            if (NSMaxRange(range) > line.length) continue;
+            NSDictionary *metrics = @{NSFontAttributeName:self.font};
+            CGFloat left = [[line substringToIndex:range.location] sizeWithAttributes:metrics].width;
+            CGFloat width = [[line substringWithRange:range] sizeWithAttributes:metrics].width;
+            [theme_color(@"selectionBackground", 0x004444) setFill];
+            NSRectFill(NSMakeRect(14 + left, y, width, self.lineHeight));
+            NSFont *selectedFont = [menu_theme[@"selectionWeight"] isEqual:@"regular"] ? self.font :
+                [[NSFontManager sharedFontManager] convertFont:self.font toHaveTrait:NSBoldFontMask];
+            [text addAttributes:@{NSFontAttributeName:selectedFont, NSForegroundColorAttributeName:theme_color(@"selectionText", 0xffffff)} range:range];
+        }
         [text drawAtPoint:NSMakePoint(14, y)];
         [NSGraphicsContext restoreGraphicsState];
         y += self.lineHeight;
@@ -165,7 +181,7 @@ static NSArray *hint_layout(id badges, NSFont *font)
         NSString *key = badge[@"key"];
         NSDictionary *rect = badge[@"rect"];
         if (![key isKindOfClass:NSString.class] || key.length != 1 ||
-            [@"0456789abcdefgimnopqrstuvwxyz" rangeOfString:key].location == NSNotFound ||
+            [@"0123456789abcdefgimnopqrstuvwxyz" rangeOfString:key].location == NSNotFound ||
             ![badge[@"display"] isKindOfClass:NSNumber.class]) return nil;
         // Display reconfiguration can temporarily invalidate individual window
         // or frame rectangles. Hints are optional: preserve the chooser and
@@ -379,7 +395,7 @@ static NSDictionary *search_layout(NSArray *entries, NSString *query, NSInteger 
     if (event.keyCode == 48) { self.hintMode = NO; [self refresh]; [self.panel makeFirstResponder:self.field]; return; }
     NSString *key = event.charactersIgnoringModifiers.lowercaseString;
     if (key.length != 1) return;
-    NSRange range = [@"0456789abcdefgimnopqrstuvwxyz" rangeOfString:key];
+    NSRange range = [@"0123456789abcdefgimnopqrstuvwxyz" rangeOfString:key];
     if (range.location != NSNotFound && range.location < [self.state[@"indices"] count]) [self choose:self.state[@"indices"][range.location]];
 }
 @end
@@ -461,6 +477,20 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
         NSArray *hints = hint_layout(payload[@"badges"], font);
         if (!hints) { fprintf(stderr, "invalid hint geometry\n"); return 1; }
         NSArray *lines = [payload[@"text"] componentsSeparatedByString:@"\n"];
+        id selections = payload[@"selections"] ?: @[];
+        if (![selections isKindOfClass:NSArray.class] || [selections count] > 64) { fprintf(stderr, "invalid selection ranges\n"); return 1; }
+        for (id selection in selections) {
+            if (![selection isKindOfClass:NSDictionary.class]) { fprintf(stderr, "invalid selection range\n"); return 1; }
+            for (NSString *field in @[@"line", @"start", @"length"]) {
+                id value = selection[field];
+                if (![value isKindOfClass:NSNumber.class] || !isfinite([value doubleValue]) ||
+                    [value doubleValue] < 0 || [value doubleValue] > 1000000 || [value doubleValue] != [value unsignedIntegerValue]) {
+                    fprintf(stderr, "invalid selection range\n"); return 1;
+                }
+            }
+            NSUInteger row = [selection[@"line"] unsignedIntegerValue], start = [selection[@"start"] unsignedIntegerValue], length = [selection[@"length"] unsignedIntegerValue];
+            if (row >= lines.count || !length || start + length > [lines[row] length]) { fprintf(stderr, "selection range outside text\n"); return 1; }
+        }
         CGFloat lineHeight = ceil(font.ascender - font.descender + font.leading) + 2;
         CGFloat width = 0;
         for (NSString *line in lines) {
@@ -470,6 +500,7 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
                                  MIN(lines.count * lineHeight + 28, screen.size.height - 32));
         PrefixMenuView *view = [[PrefixMenuView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
         view.font = font;
+        view.selections = selections;
         view.lines = lines;
         id groups = payload[@"groups"];
         if (groups && ![groups isKindOfClass:[NSArray class]]) return 1;
@@ -489,7 +520,7 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
             [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
             NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
             if (![png writeToFile:[NSString stringWithUTF8String:snapshotPath.UTF8String] atomically:YES]) return 1;
-            NSDictionary *metrics = @{ @"font":font.fontName, @"size":@(font.pointSize), @"width":@(size.width), @"height":@(size.height), @"badges":hints, @"search":searchState ?: @{} };
+            NSDictionary *metrics = @{ @"font":font.fontName, @"size":@(font.pointSize), @"width":@(size.width), @"height":@(size.height), @"badges":hints, @"selections":selections, @"search":searchState ?: @{} };
             NSData *json = [NSJSONSerialization dataWithJSONObject:metrics options:0 error:NULL];
             puts([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
             if (hints.count) {
@@ -544,9 +575,16 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
         return 0;
 }
 
+#include "prefix_config.m"
+
 int main(int argc, const char **argv)
 {
     @autoreleasepool {
+        if (argc == 3 && strcmp(argv[1], "--configure") == 0) {
+            [NSApplication sharedApplication];
+            [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+            return run_configuration([NSString stringWithUTF8String:argv[2]]);
+        }
         BOOL snapshot = argc == 4 && strcmp(argv[1], "--snapshot") == 0;
         BOOL session = argc == 4 && strcmp(argv[1], "--session") == 0;
         BOOL update = argc == 4 && strcmp(argv[1], "--update") == 0;

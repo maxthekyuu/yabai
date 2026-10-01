@@ -81,7 +81,7 @@ adjustments; Escape returns to the chooser. **Shift-E** opens equalization:
 `h` for equal widths, `v` for equal heights, `b` for both. The same size menu
 has left:right width presets: `1` = **1:2**, `2` = **1:1**, `3` = **2:1**.
 Escape returns to the chooser. These numbers select ratios only inside the size
-menu; the main menu still uses them for layouts. These controls refresh the menu and centered labels after each change.
+menu; the main menu uses r/f/b for layouts. These controls refresh the menu and centered labels after each change.
 
 Fixed ratios also work through the CLI:
 
@@ -180,7 +180,7 @@ The native renderer uses an opaque black, non-activating panel: it never takes
 keyboard focus. Install **GoMono Nerd Font Mono**; the renderer uses it at
 **12 points**. Window titles use terminal gray (`#c0c0c0`), headings cyan,
 mode choices yellow, and selected-frame markers green. The menu adapts to the
-screen with one or two columns, shortened titles, and at most 24 entries per page.
+screen with one or two columns, shortened titles, and at most 29 entries per page.
 One entry per frame (including empty frames) comes before additional stacked
 windows, making newly split containers easy to select. The running daemon must be the new build;
 a new client talking to an old daemon cannot enable the new layout.
@@ -189,7 +189,9 @@ Press **Super-S (Command-S)**, release it, then choose:
 
 | Key | Action |
 | --- | --- |
-| `1` / `2` / `3` | Ratpoison / floating / BSP on the current space |
+| `r` / `f` / `b` | Ratpoison / floating / BSP on the current space |
+| `0`–`9` | Select a numbered window in the active Space (current bank) |
+| `Shift-C` | Open searchable configuration; Save applies and persists a setting |
 | Other displayed digits/letters | Select that window or empty frame |
 | Arrows or `h/j/k/l` | Focus west/south/north/east, including empty frames |
 | `Shift-S` | Split horizontally (top/bottom) |
@@ -216,6 +218,47 @@ the menu. Choosing the already-active mode leaves its layout intact. Mode keys
 work in floating and BSP as well; the menu continues to list their windows.
 Floating-mode directional navigation chooses the nearest window centre in that
 direction; BSP uses yabai's existing managed-window navigation.
+
+### Stable window numbers and selection
+
+Each window receives a **W0, W1, …** number within its virtual Space. Numbers
+follow the window when it becomes covered in a frame stack; focusing a different
+window does not renumber the list. Closed windows release their numbers for
+reuse without shifting the remaining windows. Space UUIDs retain the scope when
+display or Space indices change. These assignments last for the Phoenix session.
+
+On the active Space, **0–9** select W0–W9. Larger lists use banks: W10–W19 use
+0–9 on the next bank, and so on. `[`/`]` or Page Up/Page Down traverse pages;
+small screens can split a bank over multiple pages without changing its keys.
+Letter shortcuts select empty frames and windows on other visible Spaces. Those
+aliases stay stable within the active Space's context, so switching virtual
+Spaces changes the shortcut scope. Search results show the stable W numbers.
+
+The current selection has a `>` marker, bold text and a contrasting background
+across its entire cell, including when it appears in the second column. Empty
+selected frames receive the same treatment. The existing `selectionText`,
+`selectionBackground` and `selectionWeight` theme options control this emphasis.
+
+### Configuration menu
+
+Press **Super-S, Shift-C** to open configuration. Search by setting name or
+group, select an option, edit its value (or choose from its dropdown), then press
+**Save** or Return. Escape closes the editor. Settings apply immediately; prefix
+theme changes appear the next time the menu opens.
+
+The editor covers all current scalar yabai config options and prefix font,
+size, palette, and colors. Yabai settings are global; commands that operate on
+an individual window or frame, rules and signals are not scalar settings.
+Unsupported settings are shown disabled with an error.
+
+Save adds or updates a marked `YABAI RATPOISON MENU CONFIG` block at the end of
+`~/.yabairc`, preserving the rest of the script and following its symlink if
+present. A `.ratpoison-backup` file beside the resolved config keeps the version
+before the latest save. Writes are atomic. Prefix theme values are stored as
+commented JSON in that same block and read by Phoenix when the module loads;
+yabai commands are saved as safely quoted shell commands. Session persistence
+is enabled last, after saved layout defaults. Existing Phoenix Ctrl-F/Super-S
+bindings and key definitions remain outside this settings editor.
 
 ### Temporary fullscreen
 
@@ -345,8 +388,8 @@ For example, to send a window to a floating external display and start tiling:
 
 1. Focus the window, press `Super-S`, then `Shift-M`.
 2. Choose the external display's visible Space, shown as `Sx (display number)`.
-3. After the window moves and receives focus there, press `1` for ratpoison,
-   `2` for floating, or `3` for BSP. The menu stays open after arrival.
+3. After the window moves and receives focus there, press `r` for ratpoison,
+   `f` for floating, or `b` for BSP. The menu stays open after arrival.
 
 Choosing a specific remote frame activates that Space and selects the frame
 before moving the window there. Empty frames are listed first within remote
@@ -364,7 +407,7 @@ sent to yabai is not undone. Space and display indices are resolved again from t
 before acting; destination lists are refreshed each time the chooser opens.
 
 **Exiting ratpoison with Shift-T defaults to floating**, even if it was entered
-from BSP. Selecting `3` explicitly chooses BSP instead. Closing the prefix menu
+from BSP. Selecting `b` explicitly chooses BSP instead. Closing the prefix menu
 with Escape does not change the tiling mode.
 
 The normal chooser keeps its native panel and labels alive during refreshes,
@@ -372,8 +415,9 @@ including Shift-J/K stack cycling. Brief malformed focused-Space query responses
 are retried while the last menu stays visible; persistent failures still report
 an error. Entering search switches to the interactive search panel.
 
-Window choices are a snapshot; labels can change after windows open/close or
-frame focus changes. `1/2/3` and `h/j/k/l` are reserved for commands. Unbound keys
+Window choices are a snapshot. Focus changes do not renumber existing windows or
+reassign their keys within the same Space context. `r/f/b` and `h/j/k/l` are
+reserved for commands. Unbound keys
 pass through to applications. Command-S and Ctrl-F are reserved globally by the module.
 The module cooperates with the existing `hintsActive`/`cancelHints` Phoenix hint
 module when opening the prefix menu. Native renderer failure closes the session

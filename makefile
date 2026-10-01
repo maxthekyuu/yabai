@@ -67,6 +67,6 @@ $(BUILD_PATH)/yabai: $(YABAI_SRC)
 	mkdir -p $(BUILD_PATH)
 	xcrun clang $^ $(BUILD_FLAGS) $(CLI_FLAGS) $(FRAMEWORK_PATH) $(FRAMEWORK) -o $@
 
-$(BUILD_PATH)/yabai-prefix: ./src/prefix_menu.m
+$(BUILD_PATH)/yabai-prefix: ./src/prefix_menu.m ./src/prefix_config.m
 	mkdir -p $(BUILD_PATH)
 	xcrun clang $< -std=c11 -Wall -Wextra -Wno-unused-parameter -O2 -fobjc-arc -mmacosx-version-min=11.0 -arch x86_64 -arch arm64 -framework Cocoa -o $@

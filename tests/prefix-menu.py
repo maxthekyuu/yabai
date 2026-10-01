@@ -17,11 +17,11 @@ OUTPUT = ROOT / 'tests/bin'
 
 
 class PrefixMenuTests(unittest.TestCase):
-    def render(self, name, text, screen, groups=None, badges=None, theme=None):
+    def render(self, name, text, screen, groups=None, badges=None, theme=None, selections=None):
         OUTPUT.mkdir(exist_ok=True)
         path = OUTPUT / name
         result = subprocess.run(
-            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen, 'groups': groups or [], 'badges': badges or [], 'theme': theme or {}})],
+            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen, 'groups': groups or [], 'badges': badges or [], 'theme': theme or {}, 'selections': selections or []})],
             capture_output=True, text=True, check=True,
         )
         metrics = json.loads(result.stdout)
@@ -188,6 +188,13 @@ class PrefixMenuTests(unittest.TestCase):
                         '-Wno-unused-parameter', '-framework', 'Cocoa', '-o', str(binary)], check=True, capture_output=True)
         subprocess.run([str(binary)], check=True, capture_output=True)
 
+    def test_configuration_controller(self):
+        OUTPUT.mkdir(exist_ok=True)
+        binary = OUTPUT / 'prefix-config-test'
+        subprocess.run(['xcrun', 'clang', str(ROOT / 'tests/prefix-config.m'), '-fobjc-arc',
+                        '-Wno-unused-parameter', '-framework', 'Cocoa', '-o', str(binary)], check=True, capture_output=True)
+        subprocess.run([str(binary)], check=True, capture_output=True)
+
     def test_theme_font_size_and_colors(self):
         theme = {'font': 'Menlo', 'fontSize': 18, 'selectionWeight': 'bold',
                  'displayColors': ['#ff8800', '#88ff00'],
@@ -196,8 +203,18 @@ class PrefixMenuTests(unittest.TestCase):
         self.render('prefix-themed.png', 'Window search\n/ editor\n\n│ > 0 Editor: notes │\nPage 1/1',
                     {'x': 0, 'y': 0, 'width': 1400, 'height': 1000}, theme=theme)
 
+    def test_selected_cell_range(self):
+        text = 'YABAI  ratpoison\nr ratpoison f floating b bsp\n\n│ 0 S1 (1) W0 Terminal    > 4 S1 (1) W1 Editor    │'
+        row = text.split('\n')[-1]
+        selections = [{'line': 3, 'start': row.index('>'), 'length': 24}]
+        metrics = self.render('prefix-selected-cell.png', text,
+                              {'x': 0, 'y': 0, 'width': 1400, 'height': 1000}, selections=selections)
+        self.assertEqual(metrics['selections'], selections)
+
     def test_invalid_payload(self):
-        for value in [json.dumps({'text':'test','theme':{'fontSize':0}}),
+        for value in [json.dumps({'text':'test','selections':[{'line':0,'start':0,'length':99}]}),
+                      json.dumps({'text':'test','selections':[{'line':0,'start':-1,'length':1}]}),
+                      json.dumps({'text':'test','theme':{'fontSize':0}}),
                       json.dumps({'text':'test','theme':{'colors':{'text':'red'}}}),
                       json.dumps({'text':'test','theme':{'displayColors':[]}}),
                       json.dumps({'text':'test','theme':{'font':'DefinitelyNotInstalledFont'}}),
