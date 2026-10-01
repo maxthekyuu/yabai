@@ -418,22 +418,14 @@ static void run_search(NSArray *entries, NSFont *font, NSRect screen)
     [NSApp run];
 }
 
-int main(int argc, const char **argv)
+static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *existingPanel,
+                       NSMutableArray *existingHints, PrefixMenuPanel **resultPanel)
 {
-    @autoreleasepool {
-        BOOL snapshot = argc == 4 && strcmp(argv[1], "--snapshot") == 0;
-        if ((!snapshot && argc != 2) || (snapshot && !argv[2][0])) {
-            fprintf(stderr, "usage: yabai-prefix [--snapshot output.png] '<menu JSON>'\n");
-            return 1;
-        }
-        NSData *data = [[NSString stringWithUTF8String:argv[snapshot ? 3 : 1]] dataUsingEncoding:NSUTF8StringEncoding];
-        id payload = [NSJSONSerialization JSONObjectWithData:data options:0 error:NULL];
+    BOOL snapshot = snapshotPath != nil;
         if (![payload isKindOfClass:[NSDictionary class]] || ![payload[@"text"] isKindOfClass:[NSString class]]) {
             fprintf(stderr, "invalid menu JSON\n");
             return 1;
         }
-        [NSApplication sharedApplication];
-        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
         if (!configure_theme(payload[@"theme"])) {
             fprintf(stderr, "invalid theme or unavailable font; check font, fontSize (6-36), and #RRGGBB colors\n");
             return 1;
@@ -496,7 +488,7 @@ int main(int argc, const char **argv)
             NSBitmapImageRep *bitmap = [view bitmapImageRepForCachingDisplayInRect:view.bounds];
             [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
             NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-            if (![png writeToFile:[NSString stringWithUTF8String:argv[2]] atomically:YES]) return 1;
+            if (![png writeToFile:[NSString stringWithUTF8String:snapshotPath.UTF8String] atomically:YES]) return 1;
             NSDictionary *metrics = @{ @"font":font.fontName, @"size":@(font.pointSize), @"width":@(size.width), @"height":@(size.height), @"badges":hints, @"search":searchState ?: @{} };
             NSData *json = [NSJSONSerialization dataWithJSONObject:metrics options:0 error:NULL];
             puts([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
@@ -504,16 +496,17 @@ int main(int argc, const char **argv)
                 PrefixHintView *hint = hint_view(hints[0], font);
                 NSBitmapImageRep *bitmap = [hint bitmapImageRepForCachingDisplayInRect:hint.bounds];
                 [hint cacheDisplayInRect:hint.bounds toBitmapImageRep:bitmap];
-                NSString *path = [[NSString stringWithUTF8String:argv[2]] stringByAppendingString:@".hint.png"];
+                NSString *path = [[NSString stringWithUTF8String:snapshotPath.UTF8String] stringByAppendingString:@".hint.png"];
                 if (![[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES]) return 1;
             }
             return 0;
         }
         NSRect frame = NSMakeRect(screen.origin.x + (screen.size.width - size.width) / 2,
                                   screen.origin.y + (screen.size.height - size.height) / 2, size.width, size.height);
-        PrefixMenuPanel *panel = [[PrefixMenuPanel alloc] initWithContentRect:frame
+        PrefixMenuPanel *panel = existingPanel ?: [[PrefixMenuPanel alloc] initWithContentRect:frame
             styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
             backing:NSBackingStoreBuffered defer:NO];
+        [panel setFrame:frame display:NO];
         panel.contentView = view;
         panel.backgroundColor = theme_color(@"background", 0);
         panel.opaque = YES;
@@ -525,13 +518,15 @@ int main(int argc, const char **argv)
                                    NSWindowCollectionBehaviorFullScreenAuxiliary |
                                    NSWindowCollectionBehaviorIgnoresCycle;
         [panel orderFrontRegardless];
-        __attribute__((objc_precise_lifetime)) NSMutableArray *hintPanels = [NSMutableArray array];
+        NSMutableArray *hintPanels = existingHints;
+        NSUInteger hintIndex = 0;
         for (NSDictionary *hint in hints) {
             NSRect bounds = NSMakeRect([hint[@"x"] doubleValue], [hint[@"y"] doubleValue],
                                       [hint[@"width"] doubleValue], [hint[@"height"] doubleValue]);
-            PrefixMenuPanel *badge = [[PrefixMenuPanel alloc] initWithContentRect:bounds
+            PrefixMenuPanel *badge = hintIndex < hintPanels.count ? hintPanels[hintIndex] : [[PrefixMenuPanel alloc] initWithContentRect:bounds
                 styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
                 backing:NSBackingStoreBuffered defer:NO];
+            [badge setFrame:bounds display:NO];
             badge.contentView = hint_view(hint, font);
             badge.backgroundColor = theme_color(@"hintBackground", 0);
             badge.opaque = YES; badge.hasShadow = NO;
@@ -539,9 +534,60 @@ int main(int argc, const char **argv)
             badge.level = NSStatusWindowLevel + 1;
             badge.collectionBehavior = panel.collectionBehavior;
             [badge orderFrontRegardless];
-            [hintPanels addObject:badge];
+            if (hintIndex == hintPanels.count) [hintPanels addObject:badge];
+            hintIndex++;
         }
+        while (hintPanels.count > hintIndex) {
+            [hintPanels.lastObject orderOut:nil]; [hintPanels removeLastObject];
+        }
+        *resultPanel = panel;
+        return 0;
+}
+
+int main(int argc, const char **argv)
+{
+    @autoreleasepool {
+        BOOL snapshot = argc == 4 && strcmp(argv[1], "--snapshot") == 0;
+        BOOL session = argc == 4 && strcmp(argv[1], "--session") == 0;
+        BOOL update = argc == 4 && strcmp(argv[1], "--update") == 0;
+        if (argc != 2 && !snapshot && !session && !update) return 1;
+        NSString *json = [NSString stringWithUTF8String:argv[argc == 4 ? 3 : 1]];
+        NSDistributedNotificationCenter *center = NSDistributedNotificationCenter.defaultCenter;
+        NSString *name = argc == 4 ? [@"org.yabai.prefix." stringByAppendingString:[NSString stringWithUTF8String:argv[2]]] : nil;
+        if (update) {
+            // Wait for acknowledgment: a helper that died must never silently leave stale hints.
+            NSString *reply = [name stringByAppendingFormat:@".%d", getpid()];
+            __block BOOL received = NO;
+            __block BOOL accepted = NO;
+            id observer = [center addObserverForName:reply object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+                accepted = [note.userInfo[@"accepted"] boolValue]; received = YES;
+            }];
+            [center postNotificationName:name object:nil userInfo:@{@"json":json, @"reply":reply} deliverImmediately:YES];
+            NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:1];
+            while (!received && deadline.timeIntervalSinceNow > 0)
+                [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
+            [center removeObserver:observer];
+            return received && accepted ? 0 : 1;
+        }
+        id payload = [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+        [NSApplication sharedApplication];
+        [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+        __block PrefixMenuPanel *panel = nil;
+        NSMutableArray *hints = [NSMutableArray array];
+        int status = render_menu(payload, snapshot ? [NSString stringWithUTF8String:argv[2]] : nil, nil, hints, &panel);
+        if (status || snapshot || payload[@"search"]) return status;
+        id observer = nil;
+        if (session) observer = [center addObserverForName:name object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
+            NSString *updateJSON = note.userInfo[@"json"];
+            NSString *reply = note.userInfo[@"reply"];
+            if (![updateJSON isKindOfClass:NSString.class] || ![reply isKindOfClass:NSString.class] ||
+                ![reply hasPrefix:[name stringByAppendingString:@"."]] || updateJSON.length > 4 * 1024 * 1024) return;
+            id next = [NSJSONSerialization JSONObjectWithData:[updateJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
+            BOOL accepted = [next isKindOfClass:NSDictionary.class] && !next[@"search"] && render_menu(next, nil, panel, hints, &panel) == 0;
+            [NSDistributedNotificationCenter.defaultCenter postNotificationName:reply object:nil userInfo:@{@"accepted":@(accepted)} deliverImmediately:YES];
+        }];
         [NSApp run];
+        if (observer) [center removeObserver:observer];
     }
     return 0;
 }

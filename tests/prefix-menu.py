@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import struct
 import subprocess
+import time
+import uuid
 import unittest
 import zlib
 
@@ -53,6 +55,25 @@ class PrefixMenuTests(unittest.TestCase):
         if color == 6:
             self.assertEqual(row[4], 255, 'background must be fully opaque')
         return metrics
+
+    def test_persistent_session_updates(self):
+        # Off-screen panel: exercise real IPC without stealing focus or flashing a HUD.
+        token = str(uuid.uuid4())
+        payload = {'text': 'YABAI first', 'screen': {'x': -20000, 'y': -20000, 'width': 1000, 'height': 800}}
+        process = subprocess.Popen([str(BINARY), '--session', token, json.dumps(payload)])
+        try:
+            time.sleep(0.3)
+            for text in ['YABAI second', 'YABAI third\n0 window']:
+                payload['text'] = text
+                result = subprocess.run([str(BINARY), '--update', token, json.dumps(payload)], timeout=3)
+                self.assertEqual(result.returncode, 0)
+                self.assertIsNone(process.poll(), 'updates must retain the native renderer process')
+            invalid = subprocess.run([str(BINARY), '--update', token, '[]'], timeout=3)
+            self.assertNotEqual(invalid.returncode, 0)
+            self.assertIsNone(process.poll(), 'invalid updates must not kill a live menu')
+        finally:
+            process.terminate()
+            process.wait(timeout=3)
 
     def test_terminal_menu(self):
         text = '\n'.join([

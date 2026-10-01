@@ -27,7 +27,8 @@ const context = {
         run(path, args, callback) {
             const id = nextId++;
             if (path === '/usr/bin/env' && args[0].endsWith('yabai-prefix')) {
-                lastMenu = JSON.parse(args[1]);
+                lastMenu = JSON.parse(args[args.length - 1]);
+                if (args[1] === '--update') { callback({ status: 0 }); return id; }
                 renderers.set(id, callback);
             } else tasks.push({ path, args, callback });
             return id;
@@ -55,7 +56,7 @@ function reply(value, status = 0) {
     task.callback({ status, output: JSON.stringify(value), error: status ? 'failure' : '' });
 }
 function expectCommand(args) { assert.deepEqual(Array.from(tasks[0].args), ['-m', ...args]); }
-function idle() { assert.equal(keys.size, 1); assert.equal(renderers.size, 0); }
+function idle() { assert.equal(keys.size, 2); assert.equal(renderers.size, 0); }
 const space = { id: 102, display: 1, 'is-visible': true, 'has-focus': true, index: 2, type: 'ratpoison', frames: [
     { id: 0, x: 0, y: 38, w: 500, h: 800, selected: true, windows: [10, 20], 'active-window': 10 },
     { id: 7, x: 500, y: 38, w: 500, h: 800, selected: false, windows: [], 'active-window': 0 }
@@ -393,7 +394,7 @@ for (const [key, ratio] of [['1','1:2'],['2','1:1'],['3','2:1']]) {
 open(badgeSpace); press('/'); reply([badgeSpace]); reply(windows.map(w => ({...w, space: 2})));
 assert.equal(lastMenu.search.length, 2); // Empty frame is not a window match.
 assert.equal(lastMenu.search[0].text, 'Terminal: One');
-assert.equal(keys.size, 2); // Only global prefix and Escape remain in Phoenix.
+assert.equal(keys.size, 3); // Global prefix, fullscreen shortcut, and Escape remain.
 assert.equal(tasks.length, 0);
 const [searchId, searchCallback] = [...renderers.entries()][0];
 renderers.delete(searchId); searchCallback({status:0, output:JSON.stringify({selection:1})});
@@ -490,3 +491,14 @@ renderers.delete(badId); badCallback({ status: 1, error: 'missing font' }); idle
 // Retain the actual compact-menu payload for native rendering verification.
 fs.writeFileSync('/tmp/yabai-prefix-test-menu.json', JSON.stringify(lastMenu));
 console.log('Phoenix navigation, layout, display/Space moves, pagination, and renderer lifecycle tests passed');
+
+press('f', ['ctrl']); expectCommand(['window', '--toggle', 'windowed-fullscreen']); reply(null); idle();
+open();
+const retainedRenderer = [...renderers.keys()][0];
+press('j', ['shift']); reply(null);
+const malformed = tasks.shift(); malformed.callback({ status: 0, output: '{', error: '' });
+assert.equal([...renderers.keys()][0], retainedRenderer);
+const queryRetry = [...timers.entries()].find(([, timer]) => timer.delay === 0.05);
+assert.ok(queryRetry); timers.delete(queryRetry[0]); queryRetry[1](); refresh();
+assert.equal([...renderers.keys()][0], retainedRenderer);
+press('escape'); idle();

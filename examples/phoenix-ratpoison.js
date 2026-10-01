@@ -11,6 +11,7 @@ var yabaiRatpoison = (function () {
     var modal = null;
     var rendererTask = null;
     var rendererGeneration = 0;
+    var rendererSession = null;
     var active = false;
     var searching = false;
     var generation = 0;
@@ -36,16 +37,30 @@ var yabaiRatpoison = (function () {
         rendererGeneration += 1;
         if (rendererTask !== null) Task.terminate(rendererTask);
         rendererTask = null;
+        rendererSession = null;
         if (modal) modal.close();
         modal = null;
     }
 
     function show(text, duration, groups, badges, search, onSelect) {
+        var payload = JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search, theme: theme, screen: Screen.main().visibleFrame() });
+        if (rendererTask !== null && rendererSession !== null && !search && !duration) {
+            var updateGeneration = rendererGeneration;
+            Task.run('/usr/bin/env', [renderer, '--update', rendererSession, payload], function (task) {
+                if (task.status !== 0 && rendererGeneration === updateGeneration) {
+                    closeMenu();
+                    show(text, duration, groups, badges, search, onSelect);
+                }
+            });
+            return;
+        }
         closeMenu();
         var current = rendererGeneration;
+        rendererSession = search || duration ? null : String(Date.now()) + '-' + String(Math.random()).slice(2);
+        var rendererArgs = rendererSession ? [renderer, '--session', rendererSession, payload] : [renderer, payload];
         // env execs the helper without a shell. A missing helper then produces
         // exit 127 and a callback; Phoenix otherwise only logs launch failures.
-        rendererTask = Task.run('/usr/bin/env', [renderer, JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search, theme: theme, screen: Screen.main().visibleFrame() })], function (task) {
+        rendererTask = Task.run('/usr/bin/env', rendererArgs, function (task) {
             if (current !== rendererGeneration) return;
             rendererTask = null;
             if (task.status === 0) {
@@ -673,14 +688,26 @@ var yabaiRatpoison = (function () {
         queuedDirection = null;
         clearKeys();
         controls();
-        // Do not launch a throwaway loading renderer before the queries finish.
-        closeMenu();
+        // Keep the last menu and its native panel visible while refreshing.
+        // Keyboard bindings remain guarded until the new query completes.
+        focusedSpace(0);
+        function focusedSpace(attempt) {
         run(['query', '--spaces', '--space'], function (spaceTask) {
             if (!active || generation !== current) return;
             if (spaceTask.status !== 0) { error(spaceTask.error || 'space query failed'); return; }
             var space;
             try { space = JSON.parse(spaceTask.output); }
-            catch (_) { error('invalid space query response'); return; }
+            catch (_) {
+                // Focus and display transitions can race the query. Retry only
+                // malformed successful responses, bounded and generation guarded.
+                if (attempt < 3) {
+                    transitionTimer = Timer.after(0.05 * (attempt + 1), function () {
+                        transitionTimer = null;
+                        if (active && generation === current) focusedSpace(attempt + 1);
+                    });
+                } else error('invalid space query response after 4 attempts; check yabai logs');
+                return;
+            }
             if (!space || !space.index || (space.type === 'ratpoison' && !Array.isArray(space.frames))) {
                 error('space query lacks frame support; restart with the new yabai build'); return;
             }
@@ -703,6 +730,7 @@ var yabaiRatpoison = (function () {
                 visibleChoices(mode, space, windows, current);
             });
         });
+        }
     }
 
     function start() {
@@ -712,6 +740,9 @@ var yabaiRatpoison = (function () {
         load('windows');
     }
 
+    Key.on('f', ['ctrl'], function (_, repeated) {
+        if (!repeated) command(['window', '--toggle', 'windowed-fullscreen']);
+    });
     Key.on('s', ['cmd'], function (_, repeated) { if (!repeated) start(); });
     Event.on('mouseDidLeftClick', function () { if (!searching) cancel(); });
     return { cancel: cancel, start: start, configure: function (options) {
