@@ -750,13 +750,15 @@ void window_manager_set_window_frame(struct window *window, float x, float y, fl
         if (size_ref) AXUIElementSetAttributeValue(window->ref, kAXSizeAttribute, size_ref);
 
         if (position_ref) {
-            AXUIElementSetAttributeValue(window->ref, kAXPositionAttribute, position_ref);
+            AXError result = AXUIElementSetAttributeValue(window->ref, kAXPositionAttribute, position_ref);
+            if (result != kAXErrorSuccess) debug("%s: %s %u position failed (%d)\n", __FUNCTION__, window->application->name, window->id, result);
             CFRelease(position_ref);
         }
 
         // NOTE(asmvik): Due to macOS constraints (visible screen-area), we might need to resize the window *after* moving it.
         if (size_ref) {
-            AXUIElementSetAttributeValue(window->ref, kAXSizeAttribute, size_ref);
+            AXError result = AXUIElementSetAttributeValue(window->ref, kAXSizeAttribute, size_ref);
+            if (result != kAXErrorSuccess) debug("%s: %s %u size failed (%d)\n", __FUNCTION__, window->application->name, window->id, result);
             CFRelease(size_ref);
         }
     });

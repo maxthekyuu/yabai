@@ -4,6 +4,8 @@ extern int g_layer_below_window_level;
 extern int g_layer_above_window_level;
 extern int g_connection;
 
+static bool window_frame_is_valid(CGRect frame);
+
 bool window_observe(struct window *window)
 {
     for (int i = 0; i < array_count(ax_window_notification); ++i) {
@@ -500,6 +502,7 @@ void window_serialize(FILE *rsp, struct window *window, uint64_t flags)
     if (flags & WINDOW_PROPERTY_FRAME) {
         if (did_output) fprintf(rsp, ",\n");
 
+        if (!window_frame_is_valid(window->frame)) window->frame = window_ax_frame(window);
         fprintf(rsp, "\t\"frame\":{\n\t\t\"x\":%.4f,\n\t\t\"y\":%.4f,\n\t\t\"w\":%.4f,\n\t\t\"h\":%.4f\n\t}", window->frame.origin.x, window->frame.origin.y, window->frame.size.width, window->frame.size.height);
         did_output = true;
     }
@@ -733,41 +736,64 @@ CFStringRef window_title(struct window *window)
     return value;
 }
 
+static bool window_frame_is_valid(CGRect frame)
+{
+    return isfinite(frame.origin.x) && isfinite(frame.origin.y) &&
+           isfinite(frame.size.width) && isfinite(frame.size.height) &&
+           frame.size.width > 0 && frame.size.height > 0;
+}
+
+static CGRect window_frame_with_fallback(CGRect observed, CGRect server, CGRect cached)
+{
+    if (window_frame_is_valid(observed)) return observed;
+    if (window_frame_is_valid(server)) return server;
+    return cached;
+}
+
 CGPoint window_ax_origin(struct window *window)
 {
     CGPoint origin = {0};
-    CFTypeRef position_ref = NULL;
+    CFTypeRef value = NULL;
+    AXError result = AXUIElementCopyAttributeValue(window->ref, kAXPositionAttribute, &value);
+    bool valid = result == kAXErrorSuccess && value &&
+        CFGetTypeID(value) == AXValueGetTypeID() &&
+        AXValueGetValue(value, kAXValueTypeCGPoint, &origin) &&
+        isfinite(origin.x) && isfinite(origin.y);
+    if (value) CFRelease(value);
+    if (valid) return origin;
 
-    AXUIElementCopyAttributeValue(window->ref, kAXPositionAttribute, &position_ref);
-
-    if (position_ref) {
-        AXValueGetValue(position_ref, kAXValueTypeCGPoint, &origin);
-        CFRelease(position_ref);
-    }
-
-    return origin;
+    // A failed AX position read must not be interpreted as a move to (0, 0).
+    CGRect server = CGRectNull;
+    if (SLSGetWindowBounds(g_connection, window->id, &server) != kCGErrorSuccess) server = CGRectNull;
+    return window_frame_with_fallback(CGRectNull, server, window->frame).origin;
 }
 
 CGRect window_ax_frame(struct window *window)
 {
-    CGRect frame = {0};
+    CGRect frame = CGRectNull;
     CFTypeRef position_ref = NULL;
     CFTypeRef size_ref = NULL;
 
-    AXUIElementCopyAttributeValue(window->ref, kAXPositionAttribute, &position_ref);
-    AXUIElementCopyAttributeValue(window->ref, kAXSizeAttribute, &size_ref);
+    AXError position_error = AXUIElementCopyAttributeValue(window->ref, kAXPositionAttribute, &position_ref);
+    AXError size_error = AXUIElementCopyAttributeValue(window->ref, kAXSizeAttribute, &size_ref);
 
-    if (position_ref) {
+    bool position_valid = position_error == kAXErrorSuccess && position_ref &&
+        CFGetTypeID(position_ref) == AXValueGetTypeID() &&
         AXValueGetValue(position_ref, kAXValueTypeCGPoint, &frame.origin);
-        CFRelease(position_ref);
-    }
-
-    if (size_ref) {
+    bool size_valid = size_error == kAXErrorSuccess && size_ref &&
+        CFGetTypeID(size_ref) == AXValueGetTypeID() &&
         AXValueGetValue(size_ref, kAXValueTypeCGSize, &frame.size);
-        CFRelease(size_ref);
-    }
+    if (position_ref) CFRelease(position_ref);
+    if (size_ref) CFRelease(size_ref);
 
-    return frame;
+    if (position_valid && size_valid && window_frame_is_valid(frame)) return frame;
+
+    // Electron applications and display reconfiguration can temporarily fail AX
+    // reads. Keep a complete rectangle; never mix an old origin with a new size
+    // or poison the geometry cache with the zero-initialized error result.
+    CGRect server = CGRectNull;
+    if (SLSGetWindowBounds(g_connection, window->id, &server) != kCGErrorSuccess) server = CGRectNull;
+    return window_frame_with_fallback(CGRectNull, server, window->frame);
 }
 
 bool window_ax_can_move(struct window *window)
