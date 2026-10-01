@@ -59,7 +59,7 @@ class PrefixMenuTests(unittest.TestCase):
     def test_persistent_session_updates(self):
         # Off-screen panel: exercise real IPC without stealing focus or flashing a HUD.
         token = str(uuid.uuid4())
-        payload = {'text': 'YABAI first', 'screen': {'x': -20000, 'y': -20000, 'width': 1000, 'height': 800}}
+        payload = {'text': 'YABAI first', 'search': None, 'screen': {'x': -20000, 'y': -20000, 'width': 1000, 'height': 800}}
         process = subprocess.Popen([str(BINARY), '--session', token, json.dumps(payload)])
         try:
             time.sleep(0.3)
@@ -210,6 +210,19 @@ class PrefixMenuTests(unittest.TestCase):
         metrics = self.render('prefix-selected-cell.png', text,
                               {'x': 0, 'y': 0, 'width': 1400, 'height': 1000}, selections=selections)
         self.assertEqual(metrics['selections'], selections)
+
+    def test_normal_menu_null_search_and_phoenix_payload(self):
+        OUTPUT.mkdir(exist_ok=True)
+        subprocess.run(['node', str(ROOT / 'tests/phoenix-ratpoison.js')], cwd=ROOT,
+                       check=True, capture_output=True)
+        payload = json.loads(Path('/tmp/yabai-prefix-test-menu.json').read_text())
+        self.assertNotIn('search', payload)
+        for explicit_null in (False, True):
+            if explicit_null:
+                payload['search'] = None
+            result = subprocess.run([str(BINARY), '--snapshot', str(OUTPUT / 'prefix-phoenix.png'),
+                                     json.dumps(payload)], check=True, capture_output=True, text=True)
+            self.assertEqual(json.loads(result.stdout)['search'], {})
 
     def test_invalid_payload(self):
         for value in [json.dumps({'text':'test','selections':[{'line':0,'start':0,'length':99}]}),

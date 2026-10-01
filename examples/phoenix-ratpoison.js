@@ -54,7 +54,7 @@ var yabaiRatpoison = (function () {
     }
 
     function show(text, duration, groups, badges, search, onSelect, selections) {
-        var payload = JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search, selections: selections || [], theme: theme, screen: Screen.main().visibleFrame() });
+        var payload = JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search || undefined, selections: selections || [], theme: theme, screen: Screen.main().visibleFrame() });
         if (rendererTask !== null && rendererSession !== null && !search && !duration) {
             var updateGeneration = rendererGeneration;
             Task.run('/usr/bin/env', [renderer, '--update', rendererSession, payload], function (task) {

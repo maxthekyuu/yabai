@@ -434,6 +434,13 @@ static void run_search(NSArray *entries, NSFont *font, NSRect screen)
     [NSApp run];
 }
 
+// JSON null is an absent optional search request, not a search entry array.
+static BOOL has_search(NSDictionary *payload)
+{
+    id search = payload[@"search"];
+    return search && search != NSNull.null;
+}
+
 static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *existingPanel,
                        NSMutableArray *existingHints, PrefixMenuPanel **resultPanel)
 {
@@ -462,7 +469,7 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
                                 [geometry[@"width"] doubleValue], [geometry[@"height"] doubleValue]);
         }
         NSDictionary *searchState = nil;
-        if (payload[@"search"]) {
+        if (has_search(payload)) {
             if (!search_entries_valid(payload[@"search"])) { fprintf(stderr, "invalid search entries\n"); return 1; }
             if (!snapshot) { run_search(payload[@"search"], font, screen); return 0; }
             NSString *query = [payload[@"query"] isKindOfClass:NSString.class] ? payload[@"query"] : @"";
@@ -613,7 +620,7 @@ int main(int argc, const char **argv)
         __block PrefixMenuPanel *panel = nil;
         NSMutableArray *hints = [NSMutableArray array];
         int status = render_menu(payload, snapshot ? [NSString stringWithUTF8String:argv[2]] : nil, nil, hints, &panel);
-        if (status || snapshot || payload[@"search"]) return status;
+        if (status || snapshot || has_search(payload)) return status;
         id observer = nil;
         if (session) observer = [center addObserverForName:name object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *note) {
             NSString *updateJSON = note.userInfo[@"json"];
@@ -621,7 +628,7 @@ int main(int argc, const char **argv)
             if (![updateJSON isKindOfClass:NSString.class] || ![reply isKindOfClass:NSString.class] ||
                 ![reply hasPrefix:[name stringByAppendingString:@"."]] || updateJSON.length > 4 * 1024 * 1024) return;
             id next = [NSJSONSerialization JSONObjectWithData:[updateJSON dataUsingEncoding:NSUTF8StringEncoding] options:0 error:NULL];
-            BOOL accepted = [next isKindOfClass:NSDictionary.class] && !next[@"search"] && render_menu(next, nil, panel, hints, &panel) == 0;
+            BOOL accepted = [next isKindOfClass:NSDictionary.class] && !has_search(next) && render_menu(next, nil, panel, hints, &panel) == 0;
             [NSDistributedNotificationCenter.defaultCenter postNotificationName:reply object:nil userInfo:@{@"accepted":@(accepted)} deliverImmediately:YES];
         }];
         [NSApp run];
