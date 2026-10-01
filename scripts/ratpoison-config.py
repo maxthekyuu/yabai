@@ -22,7 +22,7 @@ COLORS = dict(background='#000000', text='#c0c0c0', title='#55ffff', accent='#ff
               hintBackground='#000000', hintText='', hintBorder='', inputText='#c0c0c0',
               inputBackground='#000000', placeholder='#777777', caret='#ffffff',
               inputSelectionText='#ffffff', inputSelectionBackground='#005577')
-PALETTE = '#55ffff,#ff55ff,#ffff55,#55ff55,#5555ff,#ff5555'
+PALETTE = '#55ffff,#ff55ff,#55ff55,#ffff55,#5555ff,#ff5555'
 CATALOG = []
 
 def add(key, kind='enum', choices=None, group='Yabai', default=None, **limits):

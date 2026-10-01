@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Configuration bridge tests; never reads or modifies the user's config."""
+import sys
+sys.dont_write_bytecode = True
 import importlib.util
 from pathlib import Path
 import re
@@ -34,6 +36,7 @@ class ConfigurationTests(unittest.TestCase):
         names = re.findall(r'#define COMMAND_CONFIG_\w+\s+"([^"]+)"',source)
         self.assertTrue(set(names).issubset(config.BY_KEY))
         self.assertIn('ratpoison_session_persistence',config.BY_KEY)
+        self.assertIn('ratpoison_layout_persistence',config.BY_KEY)
 
     def test_idempotent_preserving_symlink_mode_and_backup(self):
         link = Path(self.tmp.name)/'link'
