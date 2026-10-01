@@ -139,6 +139,7 @@ static bool ratpoison_apply_dump(struct view *view, NSDictionary *dump)
     }
     struct view candidate = *view;
     candidate.next_frame_id = 1;
+    candidate.layout = VIEW_RATPOISON;
     if ([dump[@"layout"] intValue] == VIEW_RATPOISON) {
         candidate.root = ratpoison_load_node(dump[@"tree"], NULL, &candidate);
         /* A detached Space has no usable bounds; defer geometry until it returns. */

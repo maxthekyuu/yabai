@@ -38,6 +38,7 @@ TEST_FUNC(ratpoison_layout_validation,
 
 TEST_FUNC(ratpoison_layout_restore_transaction,
 {
+    TEST_CHECK(ts_init(4096), true);
     struct view view = ratpoison_test_view();
     NSDictionary *dump = @{@"version":@1, @"layout":@(VIEW_RATPOISON), @"selected":@2,
         @"tree":@{@"split":@1, @"ratio":@0.000001, @"left":@{@"frame":@0}, @"right":@{@"frame":@2}}};
@@ -61,4 +62,6 @@ TEST_FUNC(ratpoison_layout_restore_transaction,
         @{@123: @{@"frame":@0, @"identity":@0}}];
     TEST_CHECK(ratpoison_layout_saved_frame(&view, &window) == NULL, true);
     ratpoison_free_tree(view.root);
+    munmap(g_temp_storage.memory, g_temp_storage.size + getpagesize());
+    memset(&g_temp_storage, 0, sizeof(g_temp_storage));
 });

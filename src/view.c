@@ -634,6 +634,7 @@ struct window_node *view_find_window_node(struct view *view, uint32_t window_id)
 
 struct window_node *view_remove_window_node(struct view *view, struct window *window)
 {
+    ratpoison_layout_capture(view);
     struct window_node *node = view_find_window_node(view, window->id);
     if (!node) return NULL;
 

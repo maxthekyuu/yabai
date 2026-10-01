@@ -1196,6 +1196,7 @@ void space_manager_handle_display_add(struct space_manager *sm, uint32_t did)
                 view->uuid = CFRetain(uuid);
 
                 table_add(&sm->view, &sid, view);
+                ratpoison_layout_restore_cached(view);
                 break;
             }
         }
