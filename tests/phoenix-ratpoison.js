@@ -559,20 +559,28 @@ press('s',['cmd']); refresh(); assert.equal(lastMenu.theme.colors.hintText,undef
 press('escape'); idle();
 console.log('Stable per-Space window numbers, selected cells, and configuration integration tests passed');
 
-// Front-most entries use live border colors, independently of global selection.
+// Front-most entries use distinct bright colors, independently of global selection.
 const twoOccupied = {...space, frames: [space.frames[0], {...space.frames[1], windows:[30], 'active-window':30}]};
 open(twoOccupied, windows.concat([{id:30,app:'Browser',title:'Visible',frame:windows[0].frame}]));
 function emphasized(name) {
     return lastMenu.selections.find(span => lastMenu.text.split('\n')[span.line].slice(span.start, span.start + span.length).includes(name));
 }
-assert.equal(emphasized('Terminal').foreground, '#22cc44');
+assert.equal(emphasized('Terminal').foreground, '#55ff55');
 assert.equal(emphasized('Terminal').emphasisOnly, false);
-assert.equal(emphasized('Browser').foreground, '#667788');
+assert.equal(emphasized('Browser').foreground, '#55ffff');
 assert.equal(emphasized('Browser').emphasisOnly, true);
 assert.equal(emphasized('Editor'), undefined, 'covered stack entries remain plain');
 press('j', ['shift']); reply(null);
 refresh({...twoOccupied,frames:twoOccupied.frames.map(f => f.id === 0 ? {...f,'active-window':20} : f)}, windows.concat([{id:30,app:'Browser',title:'Visible'}]));
-assert.equal(emphasized('Editor').foreground, '#22cc44');
+assert.equal(emphasized('Editor').foreground, '#55ff55');
 assert.equal(emphasized('Terminal'), undefined);
 press('escape'); idle();
-console.log('Front-most frame entries follow border colors and stack cycling');
+console.log('Front-most frame entries use bright colors and follow stack cycling');
+
+open(twoOccupied, windows.concat([{id:30,app:'Browser',title:'Visible',frame:windows[0].frame}]));
+context.yabaiRatpoison.configure({colors:{frontWindowActive:'#ffff55',frontWindowInactive:'#ff55ff'}});
+press('j', ['shift']); reply(null);
+refresh(twoOccupied, windows.concat([{id:30,app:'Browser',title:'Visible',frame:windows[0].frame}]));
+assert.equal(emphasized('Terminal').foreground, '#ffff55');
+assert.equal(emphasized('Browser').foreground, '#ff55ff');
+press('escape'); idle();

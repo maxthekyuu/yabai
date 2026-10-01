@@ -140,7 +140,17 @@ static BOOL configure_theme(id theme)
                 [[NSScanner scannerWithString:[selection[@"foreground"] substringFromIndex:1]] scanHexInt:&rgb];
                 foreground = terminal_color(rgb);
             }
-            [text addAttributes:@{NSFontAttributeName:selectedFont, NSForegroundColorAttributeName:foreground} range:range];
+            NSMutableDictionary *entryAttributes = [@{NSFontAttributeName:selectedFont, NSForegroundColorAttributeName:foreground} mutableCopy];
+            if (selection[@"foreground"]) {
+                selectedFont = [[NSFontManager sharedFontManager] convertFont:selectedFont toHaveTrait:NSBoldFontMask | NSItalicFontMask];
+                entryAttributes[NSFontAttributeName] = selectedFont;
+                NSFontTraitMask traits = [[NSFontManager sharedFontManager] traitsOfFont:selectedFont];
+                // Some patched mono fonts ship only a regular face. Preserve
+                // their glyphs and spacing while synthesizing missing traits.
+                if (!(traits & NSItalicFontMask)) entryAttributes[NSObliquenessAttributeName] = @0.2;
+                if (!(traits & NSBoldFontMask)) entryAttributes[NSStrokeWidthAttributeName] = @-2;
+            }
+            [text addAttributes:entryAttributes range:range];
         }
         [text drawAtPoint:NSMakePoint(14, y)];
         [NSGraphicsContext restoreGraphicsState];

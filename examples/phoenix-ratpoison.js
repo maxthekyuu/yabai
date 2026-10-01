@@ -724,7 +724,8 @@ var yabaiRatpoison = (function () {
                             var owner = (item.frames || []).filter(function (frame) { return frame.windows.indexOf(entry.window) !== -1; })[0];
                             entry.selected = local && (owner ? owner.selected && owner['active-window'] === entry.window : byId[entry.window] && byId[entry.window]['has-focus']);
                             if (owner && (owner['active-window'] || owner.windows[0]) === entry.window)
-                                entry.frontColor = borderColors[entry.selected ? 'active' : 'inactive'];
+                                entry.frontColor = (theme.colors || {})[entry.selected ? 'frontWindowActive' : 'frontWindowInactive'] ||
+                                    (entry.selected ? '#55ff55' : '#55ffff');
                         } else if (entry.frame !== undefined) {
                             entry.selected = local && (item.frames || []).some(function (frame) { return frame.id === entry.frame && frame.selected; });
                             var frame = (item.frames || []).filter(function (frame) { return frame.id === entry.frame; })[0];

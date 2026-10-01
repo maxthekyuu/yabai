@@ -469,9 +469,12 @@ and close the last window in a frame, switch Spaces/displays, and switch back to
 BSP/float. Applications can enforce minimum window sizes, as with existing yabai
 layouts.
 
-The chooser renders each frame's front-most window in bold, using
-`active_frame_border_color` for the selected frame and
-`inactive_frame_border_color` for other frames. Covered stack entries stay plain.
+The chooser renders each frame's front-most window in bold italic, using bright
+green for the selected frame and bright cyan for other frames. These colors are
+configurable through `prefix.colors.frontWindowActive` and
+`prefix.colors.frontWindowInactive` in Shift-C. Missing bold/italic font faces
+are synthesized so regular-only fonts still show the emphasis. Covered stack
+entries stay plain.
 Selected empty frames use `selected_empty_border_color`. Border colors are read
 when opening the prefix menu; the selected entry also retains its cell-sized
 background highlight. Stack cycling updates the emphasis without changing window

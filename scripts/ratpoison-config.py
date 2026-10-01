@@ -18,6 +18,7 @@ END = '# END YABAI RATPOISON MENU CONFIG'
 DATA = '# ratpoison-menu-json: '
 COLORS = dict(background='#000000', text='#c0c0c0', title='#55ffff', accent='#ffff55',
               help='#aaaaaa', status='#aaaaaa', activeFrame='#55ff55', emptyFrame='#ffff55',
+              frontWindowActive='#55ff55', frontWindowInactive='#55ffff',
               error='#ff5555', selectionText='#ffffff', selectionBackground='#004444',
               hintBackground='#000000', hintText='', hintBorder='', inputText='#c0c0c0',
               inputBackground='#000000', placeholder='#777777', caret='#ffffff',
