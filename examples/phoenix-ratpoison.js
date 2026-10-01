@@ -657,25 +657,22 @@ var yabaiRatpoison = (function () {
                 }
                 if (!source) { focusSpace(); return; }
                 if (entry.frame !== undefined) {
-                    // Choose the destination frame before transferring, so tiling
-                    // admits the window there even if another frame is full.
-                    arrival = function () {
-                        request(['space', String(target.index), '--focus-frame', String(entry.frame)], function () {
-                            request(['window', String(source.id), '--space', String(target.index)], function () {
-                                waitFor(['query', '--windows', '--window', String(source.id)], function (window) {
-                                    return window && window.space === target.index;
-                                }, function () {
-                                    request(['window', String(source.id), '--frame', String(entry.frame)], focusWindow);
-                                }, 30);
-                            });
+                    // Prepare placement without focusing/clicking an empty desktop.
+                    request(['space', String(target.index), '--select-frame', String(entry.frame)], function () {
+                        request(['window', String(source.id), '--space', String(target.index)], function () {
+                            waitFor(['query', '--windows', '--window', String(source.id)], function (window) {
+                                return window && window.space === target.index;
+                            }, function () {
+                                request(['window', String(source.id), '--frame', String(entry.frame)], focusWindow);
+                            }, 30);
                         });
-                    };
-                    focusSpace(); return;
+                    });
+                    return;
                 }
                 request(['window', String(source.id), '--space', String(target.index)], function () {
                     waitFor(['query', '--windows', '--window', String(source.id)], function (window) {
                         return window && window.space === target.index;
-                    }, focusSpace, 30);
+                    }, target['is-visible'] ? focusWindow : focusSpace, 30);
                 });
             });
         }

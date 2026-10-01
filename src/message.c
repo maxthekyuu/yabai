@@ -122,6 +122,7 @@ extern bool g_verbose;
 #define COMMAND_SPACE_EQUALIZE_FRAMES "--equalize-frames"
 #define COMMAND_SPACE_SPLIT        "--split"
 #define COMMAND_SPACE_FOCUS_FRAME  "--focus-frame"
+#define COMMAND_SPACE_SELECT_FRAME "--select-frame"
 #define COMMAND_SPACE_REMOVE_FRAME "--remove-frame"
 #define COMMAND_SPACE_ONLY_FRAME   "--only-frame"
 #define COMMAND_SPACE_LABEL    "--label"
@@ -2154,6 +2155,7 @@ static void handle_domain_space(FILE *rsp, struct token domain, char *message)
                    token_equals(command, COMMAND_SPACE_RESIZE_FRAME) ||
                    token_equals(command, COMMAND_SPACE_EQUALIZE_FRAMES) ||
                    token_equals(command, COMMAND_SPACE_FOCUS_FRAME) ||
+                   token_equals(command, COMMAND_SPACE_SELECT_FRAME) ||
                    token_equals(command, COMMAND_SPACE_REMOVE_FRAME) ||
                    token_equals(command, COMMAND_SPACE_ONLY_FRAME)) {
             struct view *view = space_manager_find_view(&g_space_manager, acting_sid);
@@ -2161,14 +2163,16 @@ static void handle_domain_space(FILE *rsp, struct token domain, char *message)
                 daemon_fail(rsp, "frame commands require the ratpoison layout.\n");
                 return;
             }
-            if (token_equals(command, COMMAND_SPACE_FOCUS_FRAME)) {
-                if (acting_sid != space_manager_active_space()) {
+            if (token_equals(command, COMMAND_SPACE_FOCUS_FRAME) || token_equals(command, COMMAND_SPACE_SELECT_FRAME)) {
+                bool focus = token_equals(command, COMMAND_SPACE_FOCUS_FRAME);
+                if (focus && acting_sid != space_manager_active_space()) {
                     daemon_fail(rsp, "focus the space before selecting a frame.\n");
                     return;
                 }
                 struct window_node *node = parse_frame_selector(rsp, view, get_token(&message));
                 if (!node) return;
-                focus_ratpoison_frame(view, node);
+                if (focus) focus_ratpoison_frame(view, node);
+                else { view->selected_frame = node; ratpoison_layout_capture(view); }
             } else {
                 bool success;
                 if (token_equals(command, COMMAND_SPACE_RESIZE_FRAME)) {
@@ -2373,7 +2377,8 @@ static void handle_domain_window(FILE *rsp, struct token domain, char *message)
                 if (space_is_fullscreen(sid)) {
                     daemon_fail(rsp, "can not move window to a macOS fullscreen space!\n");
                 } else {
-                    window_manager_send_window_to_space(&g_space_manager, &g_window_manager, acting_window, sid, false);
+                    if (!window_manager_send_window_to_space(&g_space_manager, &g_window_manager, acting_window, sid, false))
+                        daemon_fail(rsp, "could not transfer window to the destination Space; it may be unavailable, full, or require the scripting addition.\n");
                 }
             }
         } else if (token_equals(command, COMMAND_WINDOW_SPACE)) {
@@ -2382,7 +2387,8 @@ static void handle_domain_window(FILE *rsp, struct token domain, char *message)
                 if (space_is_fullscreen(selector.sid)) {
                     daemon_fail(rsp, "can not move window to a macOS fullscreen space!\n");
                 } else {
-                    window_manager_send_window_to_space(&g_space_manager, &g_window_manager, acting_window, selector.sid, false);
+                    if (!window_manager_send_window_to_space(&g_space_manager, &g_window_manager, acting_window, selector.sid, false))
+                        daemon_fail(rsp, "could not transfer window to the destination Space; it may be unavailable, full, or require the scripting addition.\n");
                 }
             }
         } else if (token_equals(command, COMMAND_WINDOW_SWAP)) {

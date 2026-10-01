@@ -319,6 +319,10 @@ yabai -m space ['<SPACE_SEL>'] '<COMMAND>'
 COMMAND
 ^^^^^^^
 
+*--select-frame* '<FRAME_SEL>'::
+    Select a ratpoison frame as the insertion target without changing keyboard focus. +
+    Unlike --focus-frame, this also works on an inactive Space and does not click its desktop.
+
 *--fdump*::
     Print the selected Space's versioned layout JSON. Redirect stdout to save a layout. +
     Ratpoison dumps include split ratios, empty frames, frame IDs and selected frame.

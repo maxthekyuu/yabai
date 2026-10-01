@@ -178,9 +178,6 @@ for (const type of ['ratpoison', 'float', 'bsp']) {
     resolveDestination();
     expectCommand(['window', '10', '--space', '3']); reply(null);
     expectCommand(['query', '--windows', '--window', '10']); reply({ id: 10, space: 3 });
-    expectCommand(['query', '--spaces', '--space']); reply(space);
-    expectCommand(['space', '--focus', '3']); reply(null);
-    expectCommand(['query', '--spaces', '--space']); reply(remote);
     expectCommand(['window', '--focus', '10']); reply(null);
     refresh(remote); press('b'); expectCommand(['space', '3', '--layout', 'bsp']); reply(null); idle();
 }
@@ -214,7 +211,7 @@ destinations('u'); press('2'); resolveDestination(); reply(space); reply(null); 
 refresh(desktop, []); press('f'); expectCommand(['space', '4', '--layout', 'float']); reply(null); idle();
 // Moving within the current Space must skip the failing already-focused-space command.
 destinations('m', { ...space, type: 'float' }); press('0'); resolveDestination(); reply(null);
-reply({ id: 10, space: 2 }); reply(space);
+reply({ id: 10, space: 2 });
 expectCommand(['window', '--focus', '10']); reply(null); refresh(); press('escape'); idle();
 // A removed destination, command failure or cancellation stops the chain.
 destinations('u'); press('2'); reply([space, remote]); assert.equal(tasks.length, 0);
@@ -452,9 +449,8 @@ function openRemoteMove(type = 'ratpoison') {
     press(target.key); expectCommand(['query','--spaces']);
 }
 for (const type of ['ratpoison','float','bsp']) {
-    openRemoteMove(type); reply(moveSpaces); reply(space);
-    expectCommand(['space','--focus','3']); reply(null); reply(moveTargetSpace);
-    expectCommand(['space','3','--focus-frame','3']); reply(null);
+    openRemoteMove(type); reply(moveSpaces);
+    expectCommand(['space','3','--select-frame','3']); reply(null);
     expectCommand(['window','10','--space','3']); reply(null);
     expectCommand(['query','--windows','--window','10']); reply({id:10,space:3});
     expectCommand(['window','10','--frame','3']); reply(null);
@@ -468,9 +464,14 @@ for (const frames of [moveTargetSpace.frames.filter(f=>f.id!==3),
     assert.equal(tasks.length,0); context.yabaiRatpoison.cancel(); idle();
 }
 // Cancellation while selecting the remote frame must not subsequently transfer.
-openRemoteMove(); reply(moveSpaces); reply(space); reply(null); reply(moveTargetSpace);
-expectCommand(['space','3','--focus-frame','3']); press('escape'); reply(null);
+openRemoteMove(); reply(moveSpaces);
+expectCommand(['space','3','--select-frame','3']); press('escape'); reply(null);
 assert.equal(tasks.length,0); idle();
+// A rejected transfer stops before any Space/window focus or frame placement.
+openRemoteMove(); reply(moveSpaces);
+expectCommand(['space','3','--select-frame','3']); reply(null);
+expectCommand(['window','10','--space','3']); reply(null, 1);
+assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 // Temporary fullscreen addresses the selected frame's front window and closes
 // the menu. Repeating sends the same native toggle; no layout mutation occurs.
 for (let i = 0; i < 2; ++i) {

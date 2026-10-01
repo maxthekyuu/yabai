@@ -391,16 +391,23 @@ For example, to send a window to a floating external display and start tiling:
 3. After the window moves and receives focus there, press `r` for ratpoison,
    `f` for floating, or `b` for BSP. The menu stays open after arrival.
 
-Choosing a specific remote frame activates that Space and selects the frame
-before moving the window there. Empty frames are listed first within remote
+Choosing a specific remote frame selects it with `space --select-frame` without
+focusing or clicking that desktop. The window is transferred and its Space is
+verified before it receives focus. Empty frames are listed first within remote
 frame targets. Missing or full targets are rejected before moving.
 Moving to a ratpoison Space without choosing a frame uses its selected frame; the source frame remains
 in place even when empty. Moving to another layout uses yabai's normal placement.
 `Shift-D` and `Shift-U` let you visit containers without moving a window, including
-empty desktops, then change their layout with the same number keys.
+empty desktops, then change their layout with r/f/b.
 
-Moves and Space switches use existing yabai commands and require the same macOS
-permissions as those commands. The menu waits for asynchronous completion before
+For another physical display whose destination Space is already visible, a failed
+native Space move falls back to an Accessibility frame move, like Phoenix
+`Window.setFrame`. This does not click the wallpaper or require changing SIP.
+Hidden Spaces and other desktops on the same display still depend on the native
+Space-transfer mechanism; the fallback cannot address those. Failed transfers
+report an error before changing the window's managed-frame membership.
+
+Space switches still use yabai's usual focus commands and permissions. The menu waits for asynchronous completion before
 following focus or enabling destination layout controls. A failure stops the
 sequence and displays an error. Escape stops subsequent steps; a move already
 sent to yabai is not undone. Space and display indices are resolved again from their ids
@@ -425,6 +432,27 @@ and shows a short Phoenix error popup; no invisible command bindings remain.
 
 The repository build does not install the binary, restart your daemon, or edit
 your live Phoenix/yabai configuration.
+
+## Retaining Accessibility permission across rebuilds
+
+Sign every installed build with the same certificate and keep the bundle
+identifier `com.asmvik.yabai`. Ad-hoc signing (`codesign -s -`) changes the
+identity when the executable changes and can invalidate Accessibility approval.
+For this local installation, the existing certificate is:
+
+```sh
+make install
+make sign SIGNING_IDENTITY="Org Time Tracker Local Signing"
+cp bin/yabai /opt/homebrew/bin/yabai
+yabai --restart-service
+```
+
+`make install` builds the release executable locally; the copy installs it.
+Switching from ad-hoc signing to certificate signing can require one final
+approval in System Settings → Privacy & Security → Accessibility. If toggling
+its existing entry does not work, remove it and add `/opt/homebrew/bin/yabai`
+again, then restart the service. Keep the certificate and private key in the
+Keychain for future builds; do not replace them on each rebuild.
 
 ## Verification
 

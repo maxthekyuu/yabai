@@ -460,6 +460,13 @@ If the command is called without an argument it will try to remove a previously 
 yabai \-m space [\fI<SPACE_SEL>\fP] \fI<COMMAND>\fP
 .SS "COMMAND"
 .sp
+\fB\-\-select\-frame\fP \fI<FRAME_SEL>\fP
+.RS 4
+Select a ratpoison frame as the insertion target without changing keyboard focus.
+.br
+Unlike --focus-frame, this also works on an inactive Space and does not click its desktop.
+.RE
+.sp
 \fB\-\-fdump\fP
 .RS 4
 Print the selected Space's versioned layout JSON. Redirect stdout to save a layout.

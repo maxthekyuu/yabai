@@ -2096,12 +2096,56 @@ bool window_manager_close_window(struct window *window)
     return true;
 }
 
-void window_manager_send_window_to_space(struct space_manager *sm, struct window_manager *wm, struct window *window, uint64_t dst_sid, bool moved_by_rule)
+static bool window_manager_wait_for_space(struct window *window, uint64_t sid)
+{
+    // WindowServer completes bridged moves asynchronously, independently of our
+    // event queue. Do not commit layout membership until the server confirms it.
+    for (int i = 0; i < 50; ++i) {
+        if (window_space(window->id) == sid) return true;
+        usleep(10000);
+    }
+    return window_space(window->id) == sid;
+}
+
+static CGRect window_manager_display_move_frame(CGRect window, CGRect bounds)
+{
+    CGFloat width = fmin(window.size.width, bounds.size.width);
+    CGFloat height = fmin(window.size.height, bounds.size.height);
+    return CGRectMake(CGRectGetMidX(bounds) - width / 2, CGRectGetMidY(bounds) - height / 2, width, height);
+}
+
+bool window_manager_send_window_to_space(struct space_manager *sm, struct window_manager *wm, struct window *window, uint64_t dst_sid, bool moved_by_rule)
 {
     TIME_FUNCTION;
-
+    if (!window || !dst_sid) return false;
     uint64_t src_sid = window_space(window->id);
-    if (src_sid == dst_sid) return;
+    if (src_sid == dst_sid) return true;
+    if (!src_sid || !space_is_user(dst_sid)) return false;
+
+    struct view *destination = space_manager_find_view(sm, dst_sid);
+    if (window_manager_should_manage_window(window) && destination->layout == VIEW_RATPOISON &&
+        view_ratpoison_selected_frame(destination)->window_count >= NODE_MAX_WINDOW_COUNT) return false;
+
+    space_manager_move_window_to_space(dst_sid, window);
+    if (!window_manager_wait_for_space(window, dst_sid)) {
+        uint32_t src_did = space_display_id(src_sid), dst_did = space_display_id(dst_sid);
+        // Accessibility can move a window onto the already-visible desktop of
+        // another physical display without the scripting addition. Never claim
+        // that this can send it to a hidden desktop or another desktop on the
+        // same display. No desktop click or focus change is needed.
+        if (!src_did || !dst_did || src_did == dst_did || !space_is_visible(dst_sid) ||
+            window_space(window->id) != src_sid || window_is_fullscreen(window)) return false;
+        CGRect original = window_ax_frame(window);
+        CGRect bounds = display_bounds_constrained(dst_did, false);
+        if (!window_frame_is_valid(original) || !window_frame_is_valid(bounds)) return false;
+        CGRect target = window_manager_display_move_frame(original, bounds);
+        window_manager_set_window_frame(window, target.origin.x, target.origin.y, target.size.width, target.size.height);
+        if (!window_manager_wait_for_space(window, dst_sid)) {
+            if (window_space(window->id) == src_sid)
+                window_manager_set_window_frame(window, original.origin.x, original.origin.y, original.size.width, original.size.height);
+            return false;
+        }
+    }
 
     if ((space_is_visible(src_sid) && (moved_by_rule || wm->focused_window_id == window->id))) {
         struct window *next = window_manager_find_window_on_space_by_rank_filtering_window(wm, src_sid, 1, window->id);
@@ -2119,13 +2163,13 @@ void window_manager_send_window_to_space(struct space_manager *sm, struct window
         window_manager_purify_window(wm, window);
     }
 
-    space_manager_move_window_to_space(dst_sid, window);
     SLSSpaceSetFrontPSN(g_connection, dst_sid, window->application->psn);
 
     if (window_manager_should_manage_window(window)) {
         struct view *view = space_manager_tile_window_on_space(sm, window, dst_sid);
         window_manager_add_managed_window(wm, window, view);
     }
+    return true;
 }
 
 enum window_op_error window_manager_apply_grid(struct space_manager *sm, struct window_manager *wm, struct window *window, unsigned r, unsigned c, unsigned x, unsigned y, unsigned w, unsigned h)
