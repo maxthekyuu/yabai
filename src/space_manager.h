@@ -111,6 +111,7 @@ bool space_manager_refresh_application_windows(struct space_manager *sm);
 void space_manager_handle_display_add(struct space_manager *sm, uint32_t did);
 void space_manager_begin(struct space_manager *sm);
 
+struct window_node *ratpoison_layout_saved_frame(struct view *view, struct window *window);
 void ratpoison_layout_forget(void);
 void ratpoison_layout_capture(struct view *view);
 void ratpoison_layout_restore_cached(struct view *view);

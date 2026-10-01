@@ -2,12 +2,16 @@
  * Window IDs are deliberately not persisted: they can be reused by another process. */
 static NSMutableDictionary *ratpoison_saved_layouts;
 static bool ratpoison_restoring_layout;
+static NSMutableDictionary *ratpoison_saved_members;
+static NSMutableDictionary *ratpoison_pending_members;
 
 void ratpoison_layout_forget(void)
 {
     if (!g_space_manager.ratpoison_session_persistence) {
         [ratpoison_saved_layouts release];
         ratpoison_saved_layouts = nil;
+        [ratpoison_saved_members release]; ratpoison_saved_members = nil;
+        [ratpoison_pending_members release]; ratpoison_pending_members = nil;
     }
 }
 
@@ -50,6 +54,20 @@ void ratpoison_layout_capture(struct view *view)
     if (ratpoison_restoring_layout || !view->uuid ||
         (!g_space_manager.ratpoison_layout_persistence && !g_space_manager.ratpoison_session_persistence)) return;
     if (!ratpoison_saved_layouts) ratpoison_saved_layouts = [[NSMutableDictionary alloc] init];
+    if (view->layout == VIEW_RATPOISON) {
+        if (!ratpoison_saved_members) ratpoison_saved_members = [[NSMutableDictionary alloc] init];
+        NSMutableDictionary *members = ratpoison_saved_members[(NSString *)view->uuid];
+        if (!members) {
+            members = [NSMutableDictionary dictionary];
+            ratpoison_saved_members[(NSString *)view->uuid] = members;
+        }
+        for (struct window_node *node = window_node_find_first_leaf(view->root); node; node = window_node_find_next_leaf(node)) {
+            for (int i = 0; i < node->window_count; ++i) {
+                struct window *window = window_manager_find_window(&g_window_manager, node->window_list[i]);
+                if (window) members[@(window->id)] = @{@"frame": @(node->frame_id), @"identity": @((uintptr_t)window)};
+            }
+        }
+    }
     NSDictionary *dump = ratpoison_dump_view(view);
     NSString *key = (NSString *)view->uuid;
     if ([ratpoison_saved_layouts[key] isEqual:dump]) return;
@@ -119,13 +137,25 @@ static bool ratpoison_apply_dump(struct view *view, NSDictionary *dump)
         ratpoison_valid_node(dump[@"tree"], ids, 0);
         if (members.count > ids.count * NODE_MAX_WINDOW_COUNT) return false;
     }
+    struct view candidate = *view;
+    candidate.next_frame_id = 1;
+    if ([dump[@"layout"] intValue] == VIEW_RATPOISON) {
+        candidate.root = ratpoison_load_node(dump[@"tree"], NULL, &candidate);
+        /* A detached Space has no usable bounds; defer geometry until it returns. */
+        if (view->root->area.w > 0 && view->root->area.h > 0 &&
+            !ratpoison_plan_geometry(&candidate, candidate.root, view->root->area, 0, NULL, 0, false)) {
+            ratpoison_free_tree(candidate.root);
+            return false;
+        }
+    }
     ratpoison_restoring_layout = true;
     view_clear(view);
     view->layout = [dump[@"layout"] intValue];
     view_set_flag(view, VIEW_LAYOUT);
     if (view->layout == VIEW_RATPOISON) {
         free(view->root);
-        view->root = ratpoison_load_node(dump[@"tree"], NULL, view);
+        view->root = candidate.root;
+        view->next_frame_id = candidate.next_frame_id;
         view->selected_frame = view_ratpoison_find_frame(view, [dump[@"selected"] unsignedIntValue]);
         for (NSDictionary *member in members) {
             struct window *window = window_manager_find_window(&g_window_manager, [member[@"id"] unsignedIntValue]);
@@ -150,7 +180,26 @@ void ratpoison_layout_restore_cached(struct view *view)
 {
     if (ratpoison_restoring_layout || (!g_space_manager.ratpoison_layout_persistence && !g_space_manager.ratpoison_session_persistence) || !view->uuid) return;
     NSDictionary *dump = ratpoison_saved_layouts[(NSString *)view->uuid];
-    if (dump) ratpoison_apply_dump(view, dump);
+    if (dump && ratpoison_apply_dump(view, dump)) {
+        NSDictionary *members = ratpoison_saved_members[(NSString *)view->uuid];
+        if (members) {
+            if (!ratpoison_pending_members) ratpoison_pending_members = [[NSMutableDictionary alloc] init];
+            ratpoison_pending_members[(NSString *)view->uuid] = [[members mutableCopy] autorelease];
+        }
+    }
+}
+
+struct window_node *ratpoison_layout_saved_frame(struct view *view, struct window *window)
+{
+    if (!view->uuid) return NULL;
+    NSMutableDictionary *members = ratpoison_pending_members[(NSString *)view->uuid];
+    NSDictionary *member = members[@(window->id)];
+    if (!member) return NULL;
+    unsigned frame = [member[@"frame"] unsignedIntValue];
+    bool same_window = [member[@"identity"] unsignedLongLongValue] == (uintptr_t)window;
+    [members removeObjectForKey:@(window->id)];
+    struct window_node *node = same_window ? view_ratpoison_find_frame(view, frame) : NULL;
+    return node && node->window_count < NODE_MAX_WINDOW_COUNT ? node : NULL;
 }
 
 void ratpoison_layout_dump(FILE *rsp, struct view *view)
@@ -190,6 +239,10 @@ bool ratpoison_session_enable(void)
         })
     }
     if (!ratpoison_saved_layouts) ratpoison_saved_layouts = [[NSMutableDictionary alloc] init];
+    bool was_enabled = g_space_manager.ratpoison_session_persistence;
+    g_space_manager.ratpoison_session_persistence = true;
     table_for (struct view *view, g_space_manager.view, { ratpoison_layout_capture(view); })
-    return ratpoison_save_layouts();
+    bool success = ratpoison_save_layouts();
+    g_space_manager.ratpoison_session_persistence = was_enabled;
+    return success;
 }

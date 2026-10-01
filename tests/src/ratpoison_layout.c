@@ -35,3 +35,30 @@ TEST_FUNC(ratpoison_layout_validation,
     free(json);
     ratpoison_free_tree(view.root);
 });
+
+TEST_FUNC(ratpoison_layout_restore_transaction,
+{
+    struct view view = ratpoison_test_view();
+    NSDictionary *dump = @{@"version":@1, @"layout":@(VIEW_RATPOISON), @"selected":@2,
+        @"tree":@{@"split":@1, @"ratio":@0.000001, @"left":@{@"frame":@0}, @"right":@{@"frame":@2}}};
+    struct window_node *original = view.root;
+    TEST_CHECK(ratpoison_apply_dump(&view, dump), false);
+    TEST_CHECK(view.root == original, true);
+    TEST_CHECK(view.next_frame_id, 1);
+    dump = @{@"version":@1, @"layout":@(VIEW_RATPOISON), @"selected":@2,
+        @"tree":@{@"split":@1, @"ratio":@0.5, @"left":@{@"frame":@0}, @"right":@{@"frame":@2}}};
+    TEST_CHECK(ratpoison_apply_dump(&view, dump), true);
+    TEST_CHECK(view.selected_frame == view.root->right, true);
+    TEST_CHECK(view.next_frame_id, 3);
+    view.uuid = CFSTR("test-layout-uuid");
+    struct window window = {.id=123};
+    if (!ratpoison_pending_members) ratpoison_pending_members = [[NSMutableDictionary alloc] init];
+    ratpoison_pending_members[(NSString *)view.uuid] = [NSMutableDictionary dictionaryWithDictionary:
+        @{@123: @{@"frame":@0, @"identity":@((uintptr_t)&window)}}];
+    TEST_CHECK(ratpoison_layout_saved_frame(&view, &window) == view.root->left, true);
+    TEST_CHECK(ratpoison_layout_saved_frame(&view, &window) == NULL, true);
+    ratpoison_pending_members[(NSString *)view.uuid] = [NSMutableDictionary dictionaryWithDictionary:
+        @{@123: @{@"frame":@0, @"identity":@0}}];
+    TEST_CHECK(ratpoison_layout_saved_frame(&view, &window) == NULL, true);
+    ratpoison_free_tree(view.root);
+});

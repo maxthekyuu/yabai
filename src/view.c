@@ -767,7 +767,8 @@ void view_stack_window_node(struct window_node *node, struct window *window)
 struct window_node *view_add_window_node_with_insertion_point(struct view *view, struct window *window, uint32_t insertion_point)
 {
     if (view->layout == VIEW_RATPOISON) {
-        struct window_node *node = view_ratpoison_selected_frame(view);
+        struct window_node *node = ratpoison_layout_saved_frame(view, window);
+        if (!node) node = view_ratpoison_selected_frame(view);
         if (node->window_count == NODE_MAX_WINDOW_COUNT) return NULL;
         view_stack_window_node(node, window);
         return node;
