@@ -1,6 +1,7 @@
 FRAMEWORK_PATH = -F/System/Library/PrivateFrameworks
 FRAMEWORK      = -framework Carbon -framework Cocoa -framework CoreServices -framework CoreVideo -framework SkyLight
 CLI_FLAGS      =
+SIGNING_IDENTITY ?= yabai-cert
 BUILD_FLAGS    = -std=c11 -Wall -Wextra -g -O0 -fvisibility=hidden -mmacosx-version-min=11.0 -fno-objc-arc -arch x86_64 -arch arm64 -sectcreate __TEXT __info_plist $(INFO_PLIST)
 BUILD_PATH     = ./bin
 DOC_PATH       = ./doc
@@ -55,7 +56,8 @@ archive: man install sign icon
 	rm -rf $(ARCH_PATH)
 
 sign:
-	codesign -fs "yabai-cert" $(BUILD_PATH)/yabai
+	codesign -fs "$(SIGNING_IDENTITY)" $(BUILD_PATH)/yabai
+	codesign --verify --strict $(BUILD_PATH)/yabai
 
 clean-build:
 	rm -rf $(BUILD_PATH)
