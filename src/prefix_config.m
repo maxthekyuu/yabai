@@ -6,9 +6,21 @@
 - (BOOL)canBecomeKeyWindow { return YES; }
 @end
 
+@interface PrefixConfigButton : NSButton
+@end
+@implementation PrefixConfigButton
+- (void)drawRect:(NSRect)dirtyRect
+{
+    [theme_color(@"selectionBackground", 0x004444) setFill]; NSRectFill(self.bounds);
+    NSDictionary *attributes = @{ NSFontAttributeName:self.font, NSForegroundColorAttributeName:theme_color(self.enabled ? @"selectionText" : @"help", self.enabled ? 0xffffff : 0xaaaaaa) };
+    NSSize size = [self.title sizeWithAttributes:attributes];
+    [self.title drawAtPoint:NSMakePoint((self.bounds.size.width-size.width)/2, (self.bounds.size.height-size.height)/2) withAttributes:attributes];
+}
+@end
+
 @interface PrefixConfigController : NSObject <NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate, NSSearchFieldDelegate, NSWindowDelegate>
 @property(nonatomic, strong) PrefixConfigPanel *panel;
-@property(nonatomic, strong) NSSearchField *search;
+@property(nonatomic, strong) NSTextField *search;
 @property(nonatomic, strong) NSTableView *table;
 @property(nonatomic, strong) NSTextField *detail;
 @property(nonatomic, strong) NSTextField *value;
@@ -33,23 +45,28 @@
     label.font = menu_font; label.textColor = theme_color(@"text", 0xc0c0c0);
     [self.panel.contentView addSubview:label]; return label;
 }
-- (void)build
+- (void)build { [self buildWithDisplay:YES]; }
+- (void)buildWithDisplay:(BOOL)display
 {
     NSScreen *screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;
     NSRect area = screen.visibleFrame;
     CGFloat width = MIN(880, area.size.width - 40), height = MIN(680, area.size.height - 40);
+    CGFloat line = MAX(24, ceil(menu_font.pointSize * 1.5));
+    CGFloat helpY = 12, statusY = helpY + line + 6;
+    CGFloat editY = statusY + 2*line + 6, detailY = editY + line + 8;
+    CGFloat tableY = detailY + 2*line + 8, searchY = height - 2*line - 28;
     self.panel = [[PrefixConfigPanel alloc] initWithContentRect:NSMakeRect(NSMidX(area)-width/2, NSMidY(area)-height/2, width, height)
         styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable backing:NSBackingStoreBuffered defer:NO];
     self.panel.title = @"Ratpoison configuration"; self.panel.delegate = self;
     self.panel.backgroundColor = theme_color(@"background", 0); self.panel.opaque = YES;
     self.panel.level = NSFloatingWindowLevel; self.panel.hidesOnDeactivate = NO;
     self.panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
-    [self label:NSMakeRect(18, height-42, width-36, 24) text:@"Configuration — changes apply immediately and save to .yabairc"];
-    self.search = [[NSSearchField alloc] initWithFrame:NSMakeRect(18, height-76, width-36, 26)];
+    [self label:NSMakeRect(18, height-line-16, width-36, line) text:@"Configuration · saved to .yabairc"];
+    self.search = [[NSTextField alloc] initWithFrame:NSMakeRect(18, searchY, width-36, line)];
     self.search.textColor = theme_color(@"inputText", 0xffffff); self.search.backgroundColor = theme_color(@"inputBackground", 0x111111);
     self.search.placeholderString = @"Search settings"; self.search.delegate = self; self.search.font = menu_font;
     [self.panel.contentView addSubview:self.search];
-    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(18, 192, width-36, height-284)];
+    NSScrollView *scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(18, tableY, width-36, MAX(line, searchY-tableY-12))];
     scroll.hasVerticalScroller = YES; scroll.borderType = NSLineBorder;
     self.table = [[NSTableView alloc] initWithFrame:scroll.bounds]; self.table.delegate = self; self.table.dataSource = self;
     self.table.backgroundColor = theme_color(@"background", 0); self.table.rowHeight = MAX(24, menu_font.pointSize * 1.7);
@@ -60,21 +77,24 @@
         [self.table addTableColumn:column];
     }
     scroll.documentView = self.table; [self.panel.contentView addSubview:scroll];
-    self.detail = [self label:NSMakeRect(18, 132, width-36, 52) text:@""];
+    self.detail = [self label:NSMakeRect(18, detailY, width-36, 2*line) text:@""];
     self.detail.lineBreakMode = NSLineBreakByWordWrapping;
-    self.value = [[NSTextField alloc] initWithFrame:NSMakeRect(18, 96, width-154, 28)];
+    self.value = [[NSTextField alloc] initWithFrame:NSMakeRect(18, editY, width-174, line)];
     self.value.font = menu_font; self.value.delegate = self;
     self.value.textColor = theme_color(@"inputText", 0xffffff); self.value.backgroundColor = theme_color(@"inputBackground", 0x111111);
     self.value.target = self; self.value.action = @selector(saveValue:); [self.panel.contentView addSubview:self.value];
     self.choices = [[NSPopUpButton alloc] initWithFrame:self.value.frame pullsDown:NO];
     self.choices.font = menu_font; self.choices.hidden = YES; [self.panel.contentView addSubview:self.choices];
-    self.save = [NSButton buttonWithTitle:@"Save" target:self action:@selector(saveValue:)]; self.save.frame = NSMakeRect(width-124, 96, 106, 28);
-    self.save.keyEquivalent = @"\r"; [self.panel.contentView addSubview:self.save];
-    self.status = [self label:NSMakeRect(18, 42, width-36, 46) text:@"Loading settings…"];
+    self.save = [[PrefixConfigButton alloc] initWithFrame:NSMakeRect(width-144, editY, 126, line)];
+    self.save.title = @"Save"; self.save.target = self; self.save.action = @selector(saveValue:);
+    self.save.font = menu_font; self.save.keyEquivalent = @"\r"; [self.panel.contentView addSubview:self.save];
+    self.status = [self label:NSMakeRect(18, statusY, width-36, 2*line) text:@"Loading settings…"];
     self.status.lineBreakMode = NSLineBreakByWordWrapping;
-    [self label:NSMakeRect(18, 12, width-36, 22) text:@"Esc close · arrows select · Tab edit · Return save"];
-    [self.panel makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES];
-    [self.panel makeFirstResponder:self.search];
+    [self label:NSMakeRect(18, helpY, width-36, line) text:@"Esc close · Tab edit · Return save"];
+    if (display) {
+        [self.panel makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES];
+        [self.panel makeFirstResponder:self.search];
+    }
 }
 - (void)request:(NSArray *)arguments complete:(void (^)(NSDictionary *, NSString *))complete
 {
