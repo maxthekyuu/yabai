@@ -989,6 +989,7 @@ static EVENT_HANDLER(SLS_SPACE_DESTROYED)
         debug("%s: %lld\n", __FUNCTION__, sid);
         space_manager_remove_label_for_space(&g_space_manager, sid);
         table_remove(&g_space_manager.view, &sid);
+        ratpoison_layout_capture(view);
         view_destroy(view);
         free(view);
         event_signal_push(SIGNAL_SPACE_DESTROYED, context);

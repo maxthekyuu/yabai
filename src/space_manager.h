@@ -13,6 +13,8 @@ struct space_manager
     uint64_t current_space_id;
     uint64_t last_space_id;
     bool did_begin;
+    bool ratpoison_layout_persistence;
+    bool ratpoison_session_persistence;
     enum view_type layout;
     struct frame_border_config frame_border;
     int top_padding;
@@ -108,5 +110,12 @@ void space_manager_mark_spaces_invalid(struct space_manager *sm);
 bool space_manager_refresh_application_windows(struct space_manager *sm);
 void space_manager_handle_display_add(struct space_manager *sm, uint32_t did);
 void space_manager_begin(struct space_manager *sm);
+
+void ratpoison_layout_forget(void);
+void ratpoison_layout_capture(struct view *view);
+void ratpoison_layout_restore_cached(struct view *view);
+bool ratpoison_session_enable(void);
+void ratpoison_layout_dump(FILE *rsp, struct view *view);
+bool ratpoison_layout_restore_json(struct view *view, const char *json, size_t length);
 
 #endif

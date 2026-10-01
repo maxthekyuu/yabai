@@ -13,6 +13,7 @@ typedef TEST_SIG(function);
 
 #include "area.c"
 #include "ratpoison.c"
+#include "ratpoison_layout.c"
 #include "frame_border.c"
 #include "window_geometry.c"
 
@@ -21,6 +22,7 @@ typedef TEST_SIG(function);
     TEST_ENTRY(window_geometry_fallback)                       \
     TEST_ENTRY(display_area_is_in_direction)                   \
     TEST_ENTRY(closest_display_in_direction)                    \
+    TEST_ENTRY(ratpoison_layout_validation)                      \
     TEST_ENTRY(ratpoison_lifecycle)                              \
     TEST_ENTRY(ratpoison_capacity)                               \
     TEST_ENTRY(ratpoison_empty_frames)                           \

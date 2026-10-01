@@ -88,6 +88,7 @@
 #include "space.c"
 #include "view.c"
 #include "ratpoison.c"
+#include "ratpoison_layout.m"
 #include "frame_border.c"
 #include "window.c"
 #include "process_manager.c"

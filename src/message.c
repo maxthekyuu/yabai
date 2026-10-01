@@ -1473,6 +1473,20 @@ static void handle_domain_config(FILE *rsp, struct token domain, char *message)
             } else {
                 daemon_fail(rsp, "unknown value '%.*s' given to command '%.*s' for domain '%.*s'\n", value.token.length, value.token.text, command.length, command.text, domain.length, domain.text);
             }
+        } else if (token_equals(command, "ratpoison_layout_persistence") || token_equals(command, "ratpoison_session_persistence")) {
+            if (sel_sid) { daemon_fail(rsp, "layout persistence settings are global.\n"); return; }
+            bool session = token_equals(command, "ratpoison_session_persistence");
+            bool *enabled = session ? &g_space_manager.ratpoison_session_persistence : &g_space_manager.ratpoison_layout_persistence;
+            struct token value = get_token(&message);
+            if (!token_is_valid(value)) fprintf(rsp, "%s\n", *enabled ? "on" : "off");
+            else if (token_equals(value, "off")) {
+                *enabled = false;
+                if (!g_space_manager.ratpoison_layout_persistence) ratpoison_layout_forget();
+            }
+            else if (token_equals(value, "on")) {
+                if (session && !*enabled && !ratpoison_session_enable()) daemon_fail(rsp, "could not load or save ratpoison layouts.\n");
+                else *enabled = true;
+            } else daemon_fail(rsp, "layout persistence expects on or off.\n");
         } else if (token_equals(command, COMMAND_CONFIG_FRAME_BORDER) ||
                    token_equals(command, COMMAND_CONFIG_FRAME_BORDER_WIDTH) ||
                    token_equals(command, COMMAND_CONFIG_ACTIVE_FRAME_COLOR) ||
@@ -1902,7 +1916,13 @@ static void handle_domain_space(FILE *rsp, struct token domain, char *message)
     }
 
     for (; token_is_valid(command); command = get_token(&message)) {
-        if (token_equals(command, COMMAND_SPACE_FOCUS)) {
+        if (token_equals(command, "--fdump")) {
+            ratpoison_layout_dump(rsp, space_manager_find_view(&g_space_manager, acting_sid));
+        } else if (token_equals(command, "--frestore")) {
+            struct token value = get_token(&message);
+            if (!token_is_valid(value) || !ratpoison_layout_restore_json(space_manager_find_view(&g_space_manager, acting_sid), value.text, value.length))
+                daemon_fail(rsp, "invalid ratpoison layout dump (or too many windows for its frames).\n");
+        } else if (token_equals(command, COMMAND_SPACE_FOCUS)) {
             struct selector selector = parse_space_selector(rsp, &message, acting_sid, false);
             if (selector.did_parse && selector.sid) {
                 enum space_op_error result = space_manager_focus_space(selector.sid);

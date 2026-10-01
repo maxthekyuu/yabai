@@ -870,12 +870,18 @@ bool view_is_dirty(struct view *view)
 
 void view_flush(struct view *view)
 {
+    ratpoison_layout_capture(view);
     if (space_is_visible(view->sid)) {
         window_node_flush(view->root);
         view_clear_flag(view, VIEW_IS_DIRTY);
     } else {
         view_set_flag(view, VIEW_IS_DIRTY);
     }
+}
+
+static double view_json_number(double value)
+{
+    return isfinite(value) ? value : 0.0;
 }
 
 void view_serialize(FILE *rsp, struct view *view, uint64_t flags)
@@ -996,13 +1002,13 @@ void view_serialize(FILE *rsp, struct view *view, uint64_t flags)
                 if (!first) fprintf(rsp, ",");
                 first = false;
                 fprintf(rsp, "{\"id\":%u,\"selected\":%s,\"x\":%.4f,\"y\":%.4f,\"w\":%.4f,\"h\":%.4f,\"windows\":[",
-                        node->frame_id, json_bool(node == selected), node->area.x, node->area.y, node->area.w, node->area.h);
+                        node->frame_id, json_bool(node == selected), view_json_number(node->area.x), view_json_number(node->area.y), view_json_number(node->area.w), view_json_number(node->area.h));
                 for (int i = 0; i < node->window_count; ++i) {
                     fprintf(rsp, "%s%u", i ? "," : "", node->window_list[i]);
                 }
                 struct area content = window_node_content_area(node);
                 fprintf(rsp, "],\"active-window\":%u,\"border-width\":%.4f,\"content\":{\"x\":%.4f,\"y\":%.4f,\"w\":%.4f,\"h\":%.4f}}",
-                        node->window_order[0], node->border_width, content.x, content.y, content.w, content.h);
+                        node->window_order[0], view_json_number(node->border_width), view_json_number(content.x), view_json_number(content.y), view_json_number(content.w), view_json_number(content.h));
             }
         }
         fprintf(rsp, "]");
@@ -1015,6 +1021,12 @@ void view_update(struct view *view)
 {
     uint32_t did = space_display_id(view->sid);
     CGRect frame = display_bounds_constrained(did, false);
+    if (!did || !isfinite(frame.origin.x) || !isfinite(frame.origin.y) ||
+        !isfinite(frame.size.width) || !isfinite(frame.size.height) ||
+        frame.size.width <= 0 || frame.size.height <= 0) {
+        view_clear_flag(view, VIEW_IS_VALID);
+        return;
+    }
     view->root->area = area_from_cgrect(frame);
 
     if (view_check_flag(view, VIEW_ENABLE_PADDING)) {
@@ -1058,6 +1070,7 @@ struct view *view_create(uint64_t sid)
         view->layout = VIEW_FLOAT;
     }
 
+    ratpoison_layout_restore_cached(view);
     return view;
 }
 
