@@ -198,6 +198,22 @@ If the value is 0.0, the menubar will no longer respond to mouse\-events, effect
 The menubar will automatically become fully opaque upon entering a native\-fullscreen space, and adjusted down afterwards.
 .RE
 .sp
+\fBratpoison_layout_persistence\fP [\fI<BOOL_SEL>\fP]
+.RS 4
+Remember layouts by Space UUID across display disconnection and reconnection. Defaults to on.
+.br
+Ratpoison restores its frame tree, ratios, frame IDs and selection; other layouts retain their mode.
+.RE
+.sp
+\fBratpoison_session_persistence\fP [\fI<BOOL_SEL>\fP]
+.RS 4
+Save and restore structural layouts across daemon sessions. Defaults to off.
+.br
+Enable after layout defaults in yabairc. Uses ~/.local/state/yabai/ratpoison-layouts.json.
+.br
+Does not launch applications or persist window IDs across sessions.
+.RE
+.sp
 \fBmouse_follows_focus\fP [\fI<BOOL_SEL>\fP]
 .RS 4
 When focusing a window, put the mouse at its center.
@@ -443,6 +459,20 @@ If the command is called without an argument it will try to remove a previously 
 .sp
 yabai \-m space [\fI<SPACE_SEL>\fP] \fI<COMMAND>\fP
 .SS "COMMAND"
+.sp
+\fB\-\-fdump\fP
+.RS 4
+Print the selected Space's versioned layout JSON. Redirect stdout to save a layout.
+.br
+Ratpoison dumps include split ratios, empty frames, frame IDs and selected frame.
+.RE
+.sp
+\fB\-\-frestore\fP \fI<JSON>\fP
+.RS 4
+Restore a layout from a single JSON argument, for example "$(cat layout.json)".
+.br
+Validate the dump before replacing the current layout. Does not move windows between Spaces.
+.RE
 .sp
 \fB\-\-focus\fP \fI<SPACE_SEL>\fP
 .RS 4

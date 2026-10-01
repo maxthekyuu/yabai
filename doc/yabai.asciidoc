@@ -150,6 +150,15 @@ Global Settings
     If the value is 0.0, the menubar will no longer respond to mouse-events, effectively hiding the menubar permanently. +
     The menubar will automatically become fully opaque upon entering a native-fullscreen space, and adjusted down afterwards.
 
+*ratpoison_layout_persistence* ['<BOOL_SEL>']::
+    Remember layouts by Space UUID across display disconnection and reconnection. Defaults to on. +
+    Ratpoison restores its frame tree, ratios, frame IDs and selection; other layouts retain their mode.
+
+*ratpoison_session_persistence* ['<BOOL_SEL>']::
+    Save and restore structural layouts across daemon sessions. Defaults to off. +
+    Enable after layout defaults in yabairc. Uses ~/.local/state/yabai/ratpoison-layouts.json. +
+    Does not launch applications or persist window IDs across sessions.
+
 *mouse_follows_focus* ['<BOOL_SEL>']::
     When focusing a window, put the mouse at its center.
 
@@ -309,6 +318,14 @@ yabai -m space ['<SPACE_SEL>'] '<COMMAND>'
 
 COMMAND
 ^^^^^^^
+
+*--fdump*::
+    Print the selected Space's versioned layout JSON. Redirect stdout to save a layout. +
+    Ratpoison dumps include split ratios, empty frames, frame IDs and selected frame.
+
+*--frestore* '<JSON>'::
+    Restore a layout from a single JSON argument, for example "$(cat layout.json)". +
+    Validate the dump before replacing the current layout. Does not move windows between Spaces.
 
 *--focus* '<SPACE_SEL>'::
     Focus the given space.

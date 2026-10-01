@@ -28,7 +28,8 @@ yabai -m query --spaces frames --space
 Enable by default with `yabai -m config layout ratpoison` in yabairc. All three
 layout entry points work: global config, `config --space … layout`, and
 `space --layout`. Other layouts retain their existing behavior. Changing layouts
-resets frames; frame trees are not persisted across daemon restarts.
+resets frames. See layout persistence below for retaining layouts across display
+changes and optionally across daemon restarts.
 
 Frame 0 is the initial frame. Splitting retains its id in the left/top child and
 assigns a new id to the right/bottom child. Surviving ids do not change when other
@@ -122,6 +123,44 @@ Frame queries include the outer `frame`, inset `content` rectangle, and effectiv
 `border-width`. External window-border tools are unnecessary for ratpoison
 frames and may draw additional borders if left running.
 
+## Layout persistence and manual save/restore
+
+`ratpoison_layout_persistence` defaults to `on`. Layouts are remembered by macOS
+Space UUID so reconnecting a display can restore the layout even if Space or
+display numbers change. Ratpoison retains its split tree, ratios, frame IDs,
+empty frames, and selected frame. Other layout modes retain their mode; BSP
+rebuilds its automatic tree from the current windows.
+
+`ratpoison_session_persistence` defaults to `off`. Enable it **after** your layout
+defaults in `~/.yabairc` to save layouts to
+`~/.local/state/yabai/ratpoison-layouts.json` and restore them on startup:
+
+```sh
+yabai -m config layout float
+yabai -m config ratpoison_layout_persistence on
+yabai -m config ratpoison_session_persistence on
+```
+
+The file is updated when structural layouts change. It stores layout structure,
+not application sessions or window IDs: apps are not launched, and windows
+return through normal window management. A newly created macOS Space has a new
+UUID and therefore starts with the configured defaults. Set either option to
+`off` to disable that form of persistence.
+
+To save or restore one Space explicitly:
+
+```sh
+yabai -m space --fdump > "$HOME/my-layout.json"
+yabai -m space --frestore "$(cat "$HOME/my-layout.json")"
+# An explicit Space selector also works:
+yabai -m space 2 --fdump > "$HOME/space-2-layout.json"
+yabai -m space 2 --frestore "$(cat "$HOME/space-2-layout.json")"
+```
+
+Restoration validates the versioned JSON before changing the tree. Windows
+already in the restored Space retain their frame membership when matching
+frame IDs exist. Saved dumps do not move windows between Spaces.
+
 ## Phoenix: Super-S prefix
 
 Phoenix supports temporary key handlers, so no skhd migration is required.
@@ -179,6 +218,11 @@ Floating-mode directional navigation chooses the nearest window centre in that
 direction; BSP uses yabai's existing managed-window navigation.
 
 ### Temporary fullscreen
+
+**Ctrl-F** directly toggles temporary fullscreen for the currently focused
+window, without opening the prefix menu. Remove any existing Phoenix Ctrl-F
+binding before loading this module. In the original local configuration, Ctrl-F
+called `display_hints()` in `~/.hints.js`; that binding is now commented out.
 
 Press **Super-S, Shift-Z** to expand the selected frame's front window across
 its display. Repeat the shortcut on that window to restore its saved size and
@@ -323,9 +367,14 @@ before acting; destination lists are refreshed each time the chooser opens.
 from BSP. Selecting `3` explicitly chooses BSP instead. Closing the prefix menu
 with Escape does not change the tiling mode.
 
+The normal chooser keeps its native panel and labels alive during refreshes,
+including Shift-J/K stack cycling. Brief malformed focused-Space query responses
+are retried while the last menu stays visible; persistent failures still report
+an error. Entering search switches to the interactive search panel.
+
 Window choices are a snapshot; labels can change after windows open/close or
 frame focus changes. `1/2/3` and `h/j/k/l` are reserved for commands. Unbound keys
-pass through to applications. Command-S is reserved globally by the module.
+pass through to applications. Command-S and Ctrl-F are reserved globally by the module.
 The module cooperates with the existing `hintsActive`/`cancelHints` Phoenix hint
 module when opening the prefix menu. Native renderer failure closes the session
 and shows a short Phoenix error popup; no invisible command bindings remain.
