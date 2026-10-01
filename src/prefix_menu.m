@@ -128,29 +128,18 @@ static BOOL configure_theme(id theme)
             NSDictionary *metrics = @{NSFontAttributeName:self.font};
             CGFloat left = [[line substringToIndex:range.location] sizeWithAttributes:metrics].width;
             CGFloat width = [[line substringWithRange:range] sizeWithAttributes:metrics].width;
-            if (![selection[@"emphasisOnly"] boolValue]) {
-                [theme_color(@"selectionBackground", 0x004444) setFill];
-                NSRectFill(NSMakeRect(14 + left, y, width, self.lineHeight));
-            }
-            NSFont *selectedFont = !selection[@"foreground"] && [menu_theme[@"selectionWeight"] isEqual:@"regular"] ? self.font :
+            [theme_color(@"selectionBackground", 0x004444) setFill];
+            NSRectFill(NSMakeRect(14 + left, y, width, self.lineHeight));
+            NSFont *selectedFont = [menu_theme[@"selectionWeight"] isEqual:@"regular"] ? self.font :
                 [[NSFontManager sharedFontManager] convertFont:self.font toHaveTrait:NSBoldFontMask];
-            NSColor *foreground = theme_color(@"selectionText", 0xffffff);
-            if (selection[@"foreground"]) {
-                unsigned rgb = 0;
-                [[NSScanner scannerWithString:[selection[@"foreground"] substringFromIndex:1]] scanHexInt:&rgb];
-                foreground = terminal_color(rgb);
-            }
-            NSMutableDictionary *entryAttributes = [@{NSFontAttributeName:selectedFont, NSForegroundColorAttributeName:foreground} mutableCopy];
-            if (selection[@"foreground"]) {
-                selectedFont = [[NSFontManager sharedFontManager] convertFont:selectedFont toHaveTrait:NSBoldFontMask | NSItalicFontMask];
-                entryAttributes[NSFontAttributeName] = selectedFont;
-                NSFontTraitMask traits = [[NSFontManager sharedFontManager] traitsOfFont:selectedFont];
-                // Some patched mono fonts ship only a regular face. Preserve
-                // their glyphs and spacing while synthesizing missing traits.
-                if (!(traits & NSItalicFontMask)) entryAttributes[NSObliquenessAttributeName] = @0.2;
-                if (!(traits & NSBoldFontMask)) entryAttributes[NSStrokeWidthAttributeName] = @-2;
-            }
-            [text addAttributes:entryAttributes range:range];
+            [text addAttributes:@{NSFontAttributeName:selectedFont, NSForegroundColorAttributeName:theme_color(@"selectionText", 0xffffff)} range:range];
+        }
+        // Paint the selected frame number last so the cell selection cannot
+        // overwrite its color. Leave neighbouring and covered frame labels alone.
+        if (i > 1) {
+            NSRegularExpression *frame = [NSRegularExpression regularExpressionWithPattern:@"\\* (F[0-9]+)" options:0 error:NULL];
+            for (NSTextCheckingResult *match in [frame matchesInString:line options:0 range:NSMakeRange(0, line.length)])
+                [text addAttribute:NSForegroundColorAttributeName value:theme_color(@"selectedFrameNumber", 0xff5555) range:[match rangeAtIndex:1]];
         }
         [text drawAtPoint:NSMakePoint(14, y)];
         [NSGraphicsContext restoreGraphicsState];
@@ -514,10 +503,6 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
                     [value doubleValue] < 0 || [value doubleValue] > 1000000 || [value doubleValue] != [value unsignedIntegerValue]) {
                     fprintf(stderr, "invalid selection range\n"); return 1;
                 }
-            }
-            if ((selection[@"foreground"] && !theme_hex_valid(selection[@"foreground"])) ||
-                (selection[@"emphasisOnly"] && ![selection[@"emphasisOnly"] isKindOfClass:NSNumber.class])) {
-                fprintf(stderr, "invalid entry emphasis\n"); return 1;
             }
             NSUInteger row = [selection[@"line"] unsignedIntegerValue], start = [selection[@"start"] unsignedIntegerValue], length = [selection[@"length"] unsignedIntegerValue];
             if (row >= lines.count || !length || start + length > [lines[row] length]) { fprintf(stderr, "selection range outside text\n"); return 1; }

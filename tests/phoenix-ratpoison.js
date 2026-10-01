@@ -26,10 +26,6 @@ const context = {
     Task: {
         run(path, args, callback) {
             const id = nextId++;
-            if (args[0] === '-m' && args[1] === 'config') {
-                const colors = {active_frame_border_color:'0xff22cc44', inactive_frame_border_color:'0xff667788', selected_empty_border_color:'0xff3366ff'};
-                if (colors[args[2]]) { callback({status:0,output:colors[args[2]]}); return id; }
-            }
             if (path === '/usr/bin/python3' && args[1] === 'theme') { callback({status:0,output:'{\"theme\":{}}'}); return id; }
             if (path === '/usr/bin/env' && args[0].endsWith('yabai-prefix')) {
                 if (args[1] === '--configure') { tasks.push({path,args,callback}); return id; }
@@ -520,9 +516,8 @@ press('escape'); idle();
 // Keep identifiers and real shortcuts when the front of a stack changes.
 open();
 function selectedCell() {
-    const selected = lastMenu.selections.filter(span => !span.emphasisOnly);
-    assert.equal(selected.length, 1);
-    const span = selected[0];
+    assert.equal(lastMenu.selections.length, 1);
+    const span = lastMenu.selections[0];
     return lastMenu.text.split('\n')[span.line].slice(span.start, span.start + span.length);
 }
 assert.match(selectedCell(), /^> 0 S2 \(1\) W0 .*Terminal/);
@@ -558,29 +553,3 @@ press('c',['shift']); reply({theme:{}});
 press('s',['cmd']); refresh(); assert.equal(lastMenu.theme.colors.hintText,undefined);
 press('escape'); idle();
 console.log('Stable per-Space window numbers, selected cells, and configuration integration tests passed');
-
-// Front-most entries use distinct bright colors, independently of global selection.
-const twoOccupied = {...space, frames: [space.frames[0], {...space.frames[1], windows:[30], 'active-window':30}]};
-open(twoOccupied, windows.concat([{id:30,app:'Browser',title:'Visible',frame:windows[0].frame}]));
-function emphasized(name) {
-    return lastMenu.selections.find(span => lastMenu.text.split('\n')[span.line].slice(span.start, span.start + span.length).includes(name));
-}
-assert.equal(emphasized('Terminal').foreground, '#55ff55');
-assert.equal(emphasized('Terminal').emphasisOnly, false);
-assert.equal(emphasized('Browser').foreground, '#55ffff');
-assert.equal(emphasized('Browser').emphasisOnly, true);
-assert.equal(emphasized('Editor'), undefined, 'covered stack entries remain plain');
-press('j', ['shift']); reply(null);
-refresh({...twoOccupied,frames:twoOccupied.frames.map(f => f.id === 0 ? {...f,'active-window':20} : f)}, windows.concat([{id:30,app:'Browser',title:'Visible'}]));
-assert.equal(emphasized('Editor').foreground, '#55ff55');
-assert.equal(emphasized('Terminal'), undefined);
-press('escape'); idle();
-console.log('Front-most frame entries use bright colors and follow stack cycling');
-
-open(twoOccupied, windows.concat([{id:30,app:'Browser',title:'Visible',frame:windows[0].frame}]));
-context.yabaiRatpoison.configure({colors:{frontWindowActive:'#ffff55',frontWindowInactive:'#ff55ff'}});
-press('j', ['shift']); reply(null);
-refresh(twoOccupied, windows.concat([{id:30,app:'Browser',title:'Visible',frame:windows[0].frame}]));
-assert.equal(emphasized('Terminal').foreground, '#ffff55');
-assert.equal(emphasized('Browser').foreground, '#ff55ff');
-press('escape'); idle();
