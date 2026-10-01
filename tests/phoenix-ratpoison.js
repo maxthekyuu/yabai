@@ -26,7 +26,9 @@ const context = {
     Task: {
         run(path, args, callback) {
             const id = nextId++;
+            if (path === '/usr/bin/python3' && args[1] === 'theme') { callback({status:0,output:'{\"theme\":{}}'}); return id; }
             if (path === '/usr/bin/env' && args[0].endsWith('yabai-prefix')) {
+                if (args[1] === '--configure') { tasks.push({path,args,callback}); return id; }
                 lastMenu = JSON.parse(args[args.length - 1]);
                 if (args[1] === '--update') { callback({ status: 0 }); return id; }
                 renderers.set(id, callback);
@@ -75,16 +77,23 @@ function refresh(currentSpace = space, currentWindows = windows) {
         if (tasks[0] && tasks[0].args.join(' ') === '-m query --displays') reply(displays);
     }
 }
-function open(currentSpace = space, currentWindows = windows) { press('s', ['cmd']); refresh(currentSpace, currentWindows); }
+// Existing independent scenarios use fresh Phoenix sessions. Stability regressions
+// below reopen with press/refresh so they deliberately retain the same session.
+function resetShortcuts() {
+    context.yabaiRatpoison.cancel();
+    keys.clear();
+    vm.runInNewContext(fs.readFileSync('examples/phoenix-ratpoison.js', 'utf8'), context);
+}
+function open(currentSpace = space, currentWindows = windows) { resetShortcuts(); press('s', ['cmd']); refresh(currentSpace, currentWindows); }
 idle();
 open();
 assert.equal(hintCancellations, 1);
 assert.ok(lastMenu.text.includes('F7 [empty]'));
-assert.ok(lastMenu.text.includes('1 ratpoison   2 floating   3 bsp'));
+assert.ok(lastMenu.text.includes('r ratpoison   f floating   b bsp'));
 assert.equal(renderers.size, 1);
-press('5'); expectCommand(['window', '--focus', '20']); reply(null); idle();
+press('1'); expectCommand(['window', '--focus', '20']); reply(null); idle();
 // Empty frames are directly selectable without first entering a sub-menu.
-open(); press('4'); expectCommand(['space', '2', '--focus-frame', '7']); reply(null);
+open(); press('a'); expectCommand(['space', '2', '--focus-frame', '7']); reply(null);
 refresh({ ...space, frames: space.frames.map(f => ({ ...f, selected: f.id === 7 })) });
 assert.ok(lastMenu.text.includes('* F7 [empty]'));
 press('escape'); idle();
@@ -97,15 +106,15 @@ for (const [key, direction] of [['left', 'west'], ['h', 'west'], ['down', 'south
 // Fast prefix + direction is buffered while asynchronous queries load.
 press('s', ['cmd']); press('l'); refresh();
 expectCommand(['space', '2', '--focus-frame', 'east']); reply(null); refresh(); press('escape'); idle();
-open(); press('f', ['shift']); refresh(); press('4');
+open(); press('f', ['shift']); refresh(); press('1');
 expectCommand(['space', '2', '--focus-frame', '7']); reply(null); refresh(); press('escape');
-open(); press('m', ['shift']); refresh(); reply(displays); reply(desktops); press('4');
+open(); press('m', ['shift']); refresh(); reply(displays); reply(desktops); press('1');
 expectCommand(['window', '10', '--frame', '7']); reply(null); refresh(); press('escape');
 open(); press('v', ['shift']); expectCommand(['space', '2', '--split', 'vertical']); reply(null); refresh();
 assert.ok(lastMenu.text.includes('[empty]')); press('escape'); idle();
-// Numeric mode selection works from all layouts; reselecting ratpoison is safe.
+// Letter mode selection works from all layouts; reselecting ratpoison is safe.
 for (const type of ['ratpoison', 'float', 'bsp']) {
-    for (const [key, layout] of [['1', 'ratpoison'], ['2', 'float'], ['3', 'bsp']]) {
+    for (const [key, layout] of [['r', 'ratpoison'], ['f', 'float'], ['b', 'bsp']]) {
         open({ ...space, type }); press(key);
         if (type !== layout) { expectCommand(['space', '2', '--layout', layout]); reply(null); }
         else assert.equal(tasks.length, 0);
@@ -128,16 +137,16 @@ renderers.delete(rendererId); rendererCallback({ status: 0 }); idle();
 const many = Array.from({ length: 80 }, (_, i) => ({ id: i + 1, app: 'App', title: 'Long\tTitle\n'.repeat(25) }));
 function manySpace() { return { ...space, frames: [{ id: 0, windows: many.map(w => w.id) }] }; }
 open(manySpace(), many);
-assert.ok(lastMenu.text.includes('1/3'));
+assert.ok(lastMenu.text.includes('1/8'));
 assert.ok(lastMenu.text.split('\n').length * 18 + 28 <= screen.height * 0.9);
 assert.ok(!lastMenu.text.includes('\t'));
-press(']'); assert.ok(lastMenu.text.includes('Display 1 (continued)')); press('0'); expectCommand(['window', '--focus', '30']); reply(null); idle();
+press(']'); assert.ok(lastMenu.text.includes('Display 1 (continued)')); press('0'); expectCommand(['window', '--focus', '11']); reply(null); idle();
 screen = { x: -800, y: 200, width: 800, height: 500 };
 open(manySpace(), many);
 assert.ok(lastMenu.text.split('\n').length * 18 + 28 <= screen.height * 0.9);
 assert.deepEqual(lastMenu.screen, screen);
 assert.ok(lastMenu.text.split('\n').every(line => line.length <= 70));
-press(']'); press('0'); expectCommand(['window', '--focus', '12']); reply(null); idle();
+press(']'); press('0'); expectCommand(['window', '--focus', '11']); reply(null); idle();
 // Display and Space containers are available in every layout. Move + follow
 // waits for WindowServer completion and keeps layout controls on the destination.
 screen = { x: 0, y: 0, width: 1400, height: 1000 };
@@ -153,11 +162,11 @@ function resolveDestination(spaces = desktops, screens = displays) {
 for (const type of ['ratpoison', 'float', 'bsp']) {
     destinations('d', { ...space, type });
     assert.ok(lastMenu.text.includes('S3 (2) External [float]'));
-    press('4'); resolveDestination();
+    press('1'); resolveDestination();
     expectCommand(['query', '--spaces', '--space']); reply(space);
     expectCommand(['space', '--focus', '3']); reply(null);
     expectCommand(['query', '--spaces', '--space']); reply(remote);
-    refresh(remote); press('1'); expectCommand(['space', '3', '--layout', 'ratpoison']); reply(null); idle();
+    refresh(remote); press('r'); expectCommand(['space', '3', '--layout', 'ratpoison']); reply(null); idle();
 }
 for (const type of ['ratpoison', 'float', 'bsp']) {
     destinations('m', { ...space, type });
@@ -165,7 +174,7 @@ for (const type of ['ratpoison', 'float', 'bsp']) {
     assert.ok(lastMenu.text.includes('S2 (1)'));
     assert.ok(lastMenu.text.includes('S4 (2) [bsp]'));
     // Frames precede D1, S2, D2, S3, S4 in ratpoison; other layouts start at D1.
-    press(type === 'ratpoison' ? '7' : '5');
+    press(type === 'ratpoison' ? '4' : '2');
     resolveDestination();
     expectCommand(['window', '10', '--space', '3']); reply(null);
     expectCommand(['query', '--windows', '--window', '10']); reply({ id: 10, space: 3 });
@@ -173,25 +182,25 @@ for (const type of ['ratpoison', 'float', 'bsp']) {
     expectCommand(['space', '--focus', '3']); reply(null);
     expectCommand(['query', '--spaces', '--space']); reply(remote);
     expectCommand(['window', '--focus', '10']); reply(null);
-    refresh(remote); press('3'); expectCommand(['space', '3', '--layout', 'bsp']); reply(null); idle();
+    refresh(remote); press('b'); expectCommand(['space', '3', '--layout', 'bsp']); reply(null); idle();
 }
 // Physical display identities survive arrangement-index changes; unplugged
 // displays stop the operation rather than targeting a newly numbered monitor.
-destinations('d'); press('4');
+destinations('d'); press('1');
 const movedDisplay = { ...remote, display: 3, index: 6 };
 resolveDestination([space, movedDisplay], [displays[0], { ...displays[1], index: 3 }]);
 reply(space); expectCommand(['space', '--focus', '6']); reply(null); reply(movedDisplay);
 refresh(movedDisplay); press('escape'); idle();
-destinations('d'); press('4'); expectCommand(['query', '--displays']); reply([displays[0]]);
+destinations('d'); press('1'); expectCommand(['query', '--displays']); reply([displays[0]]);
 assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 // Space identity survives index changes while the chooser is open.
-destinations('u'); press('5');
+destinations('u'); press('2');
 const renumbered = { ...desktop, index: 6 };
 reply([space, remote, renumbered]); reply(space);
 expectCommand(['space', '--focus', '6']); reply(null); reply(renumbered);
 refresh(renumbered); press('escape'); idle();
 // Move to a hidden virtual desktop; do not focus before asynchronous movement completes.
-destinations('m', { ...space, type: 'float' }); press('7'); resolveDestination();
+destinations('m', { ...space, type: 'float' }); press('4'); resolveDestination();
 expectCommand(['window', '10', '--space', '4']); reply(null);
 reply({ id: 10, space: 2 });
 assert.equal(tasks.length, 0);
@@ -201,24 +210,24 @@ expectCommand(['query', '--windows', '--window', '10']); reply({ id: 10, space: 
 reply(space); expectCommand(['space', '--focus', '4']); reply(null); reply(desktop);
 expectCommand(['window', '--focus', '10']); reply(null); refresh(desktop); press('escape'); idle();
 // An empty desktop can be selected, then its tiling mode changed without a window.
-destinations('u'); press('5'); resolveDestination(); reply(space); reply(null); reply(desktop);
-refresh(desktop, []); press('2'); expectCommand(['space', '4', '--layout', 'float']); reply(null); idle();
+destinations('u'); press('2'); resolveDestination(); reply(space); reply(null); reply(desktop);
+refresh(desktop, []); press('f'); expectCommand(['space', '4', '--layout', 'float']); reply(null); idle();
 // Moving within the current Space must skip the failing already-focused-space command.
 destinations('m', { ...space, type: 'float' }); press('0'); resolveDestination(); reply(null);
 reply({ id: 10, space: 2 }); reply(space);
 expectCommand(['window', '--focus', '10']); reply(null); refresh(); press('escape'); idle();
 // A removed destination, command failure or cancellation stops the chain.
-destinations('u'); press('5'); reply([space, remote]); assert.equal(tasks.length, 0);
+destinations('u'); press('2'); reply([space, remote]); assert.equal(tasks.length, 0);
 context.yabaiRatpoison.cancel(); idle();
-destinations('m', { ...space, type: 'float' }); press('5'); resolveDestination(); reply(null, 1);
+destinations('m', { ...space, type: 'float' }); press('2'); resolveDestination(); reply(null, 1);
 assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
-destinations('m'); press('7'); press('escape'); reply(displays); assert.equal(tasks.length, 0); idle();
+destinations('m'); press('4'); press('escape'); reply(displays); assert.equal(tasks.length, 0); idle();
 // Cancelling a pending completion poll prevents a later timer from focusing anything.
-destinations('m', { ...space, type: 'float' }); press('5'); resolveDestination(); reply(null); reply({ space: 2 });
+destinations('m', { ...space, type: 'float' }); press('2'); resolveDestination(); reply(null); reply({ space: 2 });
 press('escape'); for (const callback of [...timers.values()]) callback(); timers.clear();
 assert.equal(tasks.length, 0); idle();
 // Completion polling is bounded and never follows a move that did not happen.
-destinations('m', { ...space, type: 'float' }); press('5'); resolveDestination(); reply(null);
+destinations('m', { ...space, type: 'float' }); press('2'); resolveDestination(); reply(null);
 for (let attempt = 0; attempt < 30; ++attempt) {
     expectCommand(['query', '--windows', '--window', '10']); reply({ id: 10, space: 2 });
     if (attempt < 29) {
@@ -238,7 +247,7 @@ const remoteFrames = { ...remote, type: 'ratpoison', frames: [
 const remoteWindows = [{ id: 30, app: 'Browser', title: 'Remote' }, { id: 40, app: 'Editor', title: 'Covered' }];
 function visibleMenu(other = remoteFrames, otherWindows = remoteWindows, mode) {
     if (mode) { open(single, [windows[0]]); press(mode, ['shift']); }
-    else press('s', ['cmd']);
+    else { resetShortcuts(); press('s', ['cmd']); }
     reply(single); reply([windows[0]]);
     expectCommand(['query', '--spaces']); reply([single, other, desktop]);
     expectCommand(['query', '--windows', '--space', '3']); reply(otherWindows);
@@ -252,26 +261,26 @@ assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2]);
 assert.ok(lastMenu.text.includes('┌ Display 1 '));
 assert.ok(lastMenu.text.includes('┌ Display 2 '));
 fs.writeFileSync('/tmp/yabai-prefix-group-menu.json', JSON.stringify(lastMenu));
-press('5'); reply([single, remoteFrames]); reply(single);
+press('c'); reply([single, remoteFrames]); reply(single);
 expectCommand(['space', '--focus', '3']); reply(null); reply(remoteFrames);
 expectCommand(['space', '3', '--focus-frame', '7']); reply(null); refresh(remoteFrames, remoteWindows);
-press('2'); expectCommand(['space', '3', '--layout', 'float']); reply(null); idle();
+press('f'); expectCommand(['space', '3', '--layout', 'float']); reply(null); idle();
 // Covered remote windows are focused in their original frame, never moved.
-visibleMenu(); press('6'); reply([single, remoteFrames]); reply(single); reply(null); reply(remoteFrames);
+visibleMenu(); press('d'); reply([single, remoteFrames]); reply(single); reply(null); reply(remoteFrames);
 expectCommand(['query', '--windows', '--window', '40']); reply({ id: 40, space: 3 });
 expectCommand(['space', '3', '--focus-frame', '0']); reply(null);
 expectCommand(['window', '--focus', '40']); reply(null); refresh(remoteFrames, remoteWindows); press('escape'); idle();
 // Floating windows and empty containers are reachable from the same main menu.
-visibleMenu(remote, [remoteWindows[0]]); press('4'); reply([single, remote]); reply(single); reply(null); reply(remote);
+visibleMenu(remote, [remoteWindows[0]]); press('a'); reply([single, remote]); reply(single); reply(null); reply(remote);
 expectCommand(['query', '--windows', '--window', '30']); reply({ id: 30, space: 3 });
 expectCommand(['window', '--focus', '30']); reply(null); refresh(remote, [remoteWindows[0]]); press('escape'); idle();
 visibleMenu(remote, []); assert.ok(lastMenu.text.includes('S3 (2) [float, empty]'));
-press('4'); reply([single, remote]); reply(single); reply(null); reply(remote); refresh(remote, []);
-press('1'); expectCommand(['space', '3', '--layout', 'ratpoison']); reply(null); idle();
-visibleMenu(remoteFrames, remoteWindows, 'f'); press('5'); reply([single, remoteFrames]); reply(single); reply(null); reply(remoteFrames);
+press('a'); reply([single, remote]); reply(single); reply(null); reply(remote); refresh(remote, []);
+press('r'); expectCommand(['space', '3', '--layout', 'ratpoison']); reply(null); idle();
+visibleMenu(remoteFrames, remoteWindows, 'f'); press('2'); reply([single, remoteFrames]); reply(single); reply(null); reply(remoteFrames);
 expectCommand(['space', '3', '--focus-frame', '7']); reply(null); refresh(remoteFrames, remoteWindows); press('escape'); idle();
 // A Space that became hidden must not be activated from the visible-only list.
-visibleMenu(); press('5'); reply([single, { ...remoteFrames, 'is-visible': false }]);
+visibleMenu(); press('c'); reply([single, { ...remoteFrames, 'is-visible': false }]);
 assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 // Late remote queries cannot reopen a cancelled chooser.
 press('s', ['cmd']); reply(single); reply([windows[0]]); reply([single, remoteFrames]);
@@ -279,7 +288,7 @@ press('escape'); reply(remoteWindows); idle();
 // Display order is physical-index order even when display 2 has focus.
 press('s', ['cmd']); reply(remote); reply([remoteWindows[0]]); reply([remote, single]); reply([windows[0]]);
 assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2]);
-press('4'); expectCommand(['window', '--focus', '30']); reply(null); idle();
+press('0'); expectCommand(['window', '--focus', '30']); reply(null); idle();
 // Labels use existing frame/window geometry and exactly the current page's keys.
 const badgeRect = { x: -900, y: -100, w: 400, h: 300 };
 const badgeSpace = { ...space, frames: [
@@ -287,10 +296,10 @@ const badgeSpace = { ...space, frames: [
     { id: 7, windows: [], x: -500, y: -100, w: 400, h: 300 }
 ] };
 open(badgeSpace);
-assert.deepEqual(Array.from(lastMenu.badges, b => b.key), ['0', '4', '5']);
+assert.deepEqual(Array.from(lastMenu.badges, b => b.key), ['0', '1', 'a']);
 assert.deepEqual(JSON.parse(JSON.stringify(lastMenu.badges[0].rect)), badgeRect);
-assert.equal(lastMenu.badges[2].rect.x, -900); // Covered window shares the frame center.
-assert.equal(lastMenu.badges[1].rect.x, -500);
+assert.equal(lastMenu.badges[1].rect.x, -900); // Covered window shares the frame center.
+assert.equal(lastMenu.badges[2].rect.x, -500);
 assert.equal(tasks.length, 0); // No additional geometry query for frames.
 assert.equal(renderers.size, 1); // Menu and all badges share one process.
 press('escape'); idle();
@@ -304,8 +313,8 @@ open({ ...space, type: 'float' });
 assert.equal(lastMenu.badges[0].rect.x, windows[0].frame.x); press('escape'); idle();
 const withRects = many.map((w, i) => ({ ...w, frame: { x: i * 10, y: 0, w: 200, h: 100 } }));
 open({ ...space, type: 'float' }, withRects);
-assert.equal(lastMenu.badges.length, 29);
-press(']'); assert.equal(lastMenu.badges[0].key, '0'); assert.equal(lastMenu.badges[0].rect.x, 290);
+assert.equal(lastMenu.badges.length, 10);
+press(']'); assert.equal(lastMenu.badges[0].key, '0'); assert.equal(lastMenu.badges[0].rect.x, 100);
 assert.equal(renderers.size, 1); press('escape'); idle();
 fs.writeFileSync('/tmp/yabai-prefix-hint-menu.json', JSON.stringify(lastMenu));
 // Empty visible containers get a single display-bounds query; hidden Spaces
@@ -317,7 +326,7 @@ assert.equal(lastMenu.badges.length, 1);
 assert.equal(lastMenu.badges[0].rect.w, 1400); press('escape'); idle();
 destinations('u');
 assert.equal(lastMenu.badges.length, 2);
-assert.deepEqual(Array.from(lastMenu.badges, b => b.key), ['0', '4']);
+assert.deepEqual(Array.from(lastMenu.badges, b => b.key), ['0', '1']);
 press('escape'); idle();
 // A display with many Spaces must not bury the other displays on page one.
 const threeDisplays = [...displays, { id: 503, index: 3, frame: { x: 1400, y: 0, w: 1000, h: 800 } }];
@@ -345,14 +354,14 @@ press('escape'); reply(null); idle();
 // All paging aliases update the same page, hints and count indicator, without
 // querying yabai again. Reverse paging wraps as well.
 open({ ...space, type: 'float' }, withRects);
-assert.ok(lastMenu.text.includes('Page 1/3 | 29/80 choices'));
+assert.ok(lastMenu.text.includes('Page 1/8 | 10/80 choices'));
 for (const [forward, reverse] of [['pageDown', 'pageUp'], ['space', 'space']]) {
-    press(forward); assert.ok(lastMenu.text.includes('Page 2/3')); assert.equal(lastMenu.badges[0].rect.x, 290);
+    press(forward); assert.ok(lastMenu.text.includes('Page 2/8')); assert.equal(lastMenu.badges[0].rect.x, 100);
     press(reverse, reverse === 'space' ? ['shift'] : []);
-    assert.ok(lastMenu.text.includes('Page 1/3'));
+    assert.ok(lastMenu.text.includes('Page 1/8'));
     assert.equal(tasks.length, 0);
 }
-press('pageUp'); assert.ok(lastMenu.text.includes('Page 3/3 | 22/80 choices'));
+press('pageUp'); assert.ok(lastMenu.text.includes('Page 8/8 | 10/80 choices'));
 press('escape'); idle();
 // Many physical displays paginate without exceeding the height/key budget.
 const screens40 = Array.from({length: 40}, (_, i) => ({id: 500+i, index: i+1}));
@@ -482,7 +491,7 @@ for (const [key,id] of [['j','20'],['k','30']]) {
 open({...space,frames:space.frames.map(f=>({...f,selected:f.id===7}))});
 press('j',['shift']); press('k',['shift']); assert.equal(tasks.length,0); press('escape'); idle();
 context.yabaiRatpoison.configure({font:'Menlo',fontSize:18,selectionWeight:'bold',colors:{title:'#abcdef'},displayColors:['#ff8800']});
-open(); assert.equal(lastMenu.theme.font,'Menlo'); assert.equal(lastMenu.theme.fontSize,18);
+press('s', ['cmd']); refresh(); assert.equal(lastMenu.theme.font,'Menlo'); assert.equal(lastMenu.theme.fontSize,18);
 assert.equal(lastMenu.theme.colors.title,'#abcdef'); press('escape'); idle();
 context.yabaiRatpoison.configure({font:'GoMono Nerd Font Mono',fontSize:12,colors:{},displayColors:['#55ffff','#ff55ff']});
 // Native rendering failure closes the session, with an explicit fallback error.
@@ -502,3 +511,44 @@ const queryRetry = [...timers.entries()].find(([, timer]) => timer.delay === 0.0
 assert.ok(queryRetry); timers.delete(queryRetry[0]); queryRetry[1](); refresh();
 assert.equal([...renderers.keys()][0], retainedRenderer);
 press('escape'); idle();
+
+// Keep identifiers and real shortcuts when the front of a stack changes.
+open();
+function selectedCell() {
+    assert.equal(lastMenu.selections.length, 1);
+    const span = lastMenu.selections[0];
+    return lastMenu.text.split('\n')[span.line].slice(span.start, span.start + span.length);
+}
+assert.match(selectedCell(), /^> 0 S2 \(1\) W0 .*Terminal/);
+press('j', ['shift']); expectCommand(['window', '--focus', '20']); reply(null);
+const editorFront = {...space, frames: space.frames.map(f => f.id === 0 ? {...f, 'active-window': 20} : f)};
+refresh(editorFront, windows.map(w => ({...w, 'has-focus': w.id === 20})));
+assert.match(selectedCell(), /^> 1 S2 \(1\) W1 .*Editor/);
+press('0'); expectCommand(['window', '--focus', '10']); reply(null); idle();
+// Closing W0 frees exactly W0, leaving W1 unchanged; the new window gets W0.
+const replacement = {id:30,app:'Browser',title:'New',frame:windows[0].frame};
+const replacementSpace = {...space, frames:[{...space.frames[0],windows:[20,30],'active-window':20}]};
+press('s',['cmd']); refresh(replacementSpace,[windows[1],replacement]);
+assert.match(selectedCell(), /^> 1 S2 \(1\) W1 .*Editor/);
+press('0'); expectCommand(['window','--focus','30']); reply(null); idle();
+// Space UUID, rather than changeable Mission Control index, scopes numbers.
+open({...space,uuid:'stable-space'});
+press('escape');
+press('s',['cmd']); refresh({...editorFront,id:909,index:8,uuid:'stable-space'});
+assert.match(selectedCell(), /^> 1 S8 \(1\) W1 .*Editor/);
+press('escape'); idle();
+// Selected empty frames also carry an explicit selected cell span.
+open({...space,frames:space.frames.map(f=>({...f,selected:f.id===7}))});
+assert.match(selectedCell(), /^> a .*F7 \[empty\]/); press('escape'); idle();
+// Configuration runs separately from prefix rendering, ignores duplicate opens,
+// and replaces its saved theme layer so resetting an optional color takes effect.
+open(); press('c',['shift']);
+assert.equal(tasks[0].args[1], '--configure');
+assert.equal(renderers.size,0);
+press('s',['cmd']); assert.equal(tasks.length,1);
+reply({theme:{colors:{hintText:'#112233'}}});
+press('s',['cmd']); refresh(); assert.equal(lastMenu.theme.colors.hintText,'#112233');
+press('c',['shift']); reply({theme:{}});
+press('s',['cmd']); refresh(); assert.equal(lastMenu.theme.colors.hintText,undefined);
+press('escape'); idle();
+console.log('Stable per-Space window numbers, selected cells, and configuration integration tests passed');

@@ -4,9 +4,20 @@ var yabaiRatpoison = (function () {
     var theme = typeof yabaiRatpoisonConfig === 'object' && yabaiRatpoisonConfig ? yabaiRatpoisonConfig : {};
     var executable = '/opt/homebrew/bin/yabai';
     var renderer = '/Users/jkuhn/Software/yabai/bin/yabai-prefix';
-    // 1/2/3 select layouts; h/j/k/l navigate. Never reuse command keys as hints.
-    var alphabet = '0456789abcdefgimnopqrstuvwxyz';
+    var settingsBackend = '/Users/jkuhn/Software/yabai/scripts/ratpoison-config.py';
+    var themeRevision = 0;
+    var baseTheme = theme;
+    var savedTheme = {};
+    var configTask = null;
+
+    function mergeTheme() {
+        theme = Object.assign({}, baseTheme, savedTheme, { colors: Object.assign({}, baseTheme.colors || {}, savedTheme.colors || {}) });
+    }
+    // r/f/b select layouts; h/j/k/l navigate. Numbers select stable local windows.
+    var alphabet = '0123456789acdegimnopqstuvwxyz';
     var keys = [];
+    var windowNumbers = {};
+    var shortcutSlots = {};
     var transitionTimer = null;
     var modal = null;
     var rendererTask = null;
@@ -42,14 +53,14 @@ var yabaiRatpoison = (function () {
         modal = null;
     }
 
-    function show(text, duration, groups, badges, search, onSelect) {
-        var payload = JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search, theme: theme, screen: Screen.main().visibleFrame() });
+    function show(text, duration, groups, badges, search, onSelect, selections) {
+        var payload = JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search, selections: selections || [], theme: theme, screen: Screen.main().visibleFrame() });
         if (rendererTask !== null && rendererSession !== null && !search && !duration) {
             var updateGeneration = rendererGeneration;
             Task.run('/usr/bin/env', [renderer, '--update', rendererSession, payload], function (task) {
                 if (task.status !== 0 && rendererGeneration === updateGeneration) {
                     closeMenu();
-                    show(text, duration, groups, badges, search, onSelect);
+                    show(text, duration, groups, badges, search, onSelect, selections);
                 }
             });
             return;
@@ -190,10 +201,27 @@ var yabaiRatpoison = (function () {
         update(['window', '--focus', String(target)]);
     }
 
+    function configurationMenu() {
+        cancel();
+        if (configTask !== null) return;
+        configTask = Task.run('/usr/bin/env', [renderer, '--configure', settingsBackend], function (task) {
+            configTask = null;
+            if (task.status !== 0) { error(task.error || 'configuration menu failed'); return; }
+            var result;
+            try { result = JSON.parse(task.output); } catch (_) {}
+            if (result && result.theme && typeof result.theme === 'object') {
+                savedTheme = result.theme;
+                mergeTheme();
+                ++themeRevision;
+            }
+        });
+    }
+
     function controls(space, windows) {
         bind('escape', [], cancel);
+        bind('c', ['shift'], configurationMenu);
         ['ratpoison', 'float', 'bsp'].forEach(function (layout, index) {
-            bind(String(index + 1), [], function () { setLayout(space, layout); });
+            bind(['r', 'f', 'b'][index], [], function () { setLayout(space, layout); });
         });
         [['left', 'h', 'west'], ['down', 'j', 'south'], ['up', 'k', 'north'], ['right', 'l', 'east']].forEach(function (entry) {
             function move() {
@@ -279,7 +307,10 @@ var yabaiRatpoison = (function () {
                 var windows;
                 try { windows = JSON.parse(windowTask.output); } catch (_) {}
                 if (windowTask.status !== 0 || !Array.isArray(windows)) { error('search window query failed'); return; }
-                var results = [];
+                var results = [], numbersBySpace = {};
+                spaces.forEach(function (space) {
+                    numbersBySpace[space.id] = numberWindows(space, windows.filter(function (window) { return window.space === space.index; }));
+                });
                 windows.forEach(function (window) {
                     var space = spaces.filter(function (item) { return item.index === window.space; })[0];
                     if (!space) return;
@@ -289,7 +320,7 @@ var yabaiRatpoison = (function () {
                              ? (owner ? frameRect(owner) : window.frame) : undefined;
                     results.push({ window: window.id, space: space, rect: rect, text: text, pid: window.pid,
                         minimized: window['is-minimized'], hidden: window['is-hidden'], searchable: true,
-                        label: 'S' + space.index + ' (' + space.display + ') ' + text +
+                        label: 'S' + space.index + ' (' + space.display + ') W' + numbersBySpace[space.id][window.id] + ' ' + text +
                                (window['is-minimized'] ? ' [minimized]' : window['is-hidden'] ? ' [hidden]' : '') });
                 });
                 var search = results.map(function (entry, index) {
@@ -303,6 +334,65 @@ var yabaiRatpoison = (function () {
                 });
             });
         });
+    }
+
+    function spaceIdentity(space) { return space.uuid || String(space.id); }
+
+    // Number windows within a Space without renumbering survivors on focus,
+    // stacking, closing or opening another window. Only absent windows free a number.
+    function numberWindows(space, windows) {
+        var identity = spaceIdentity(space);
+        var numbers = windowNumbers[identity] || (windowNumbers[identity] = {});
+        var live = {};
+        windows.forEach(function (window) { live[window.id] = true; });
+        (space.type === 'ratpoison' ? space.frames || [] : []).forEach(function (frame) {
+            frame.windows.forEach(function (id) { live[id] = true; });
+        });
+        Object.keys(numbers).forEach(function (id) { if (!live[id]) delete numbers[id]; });
+        Object.keys(live).sort(function (a, b) { return Number(a) - Number(b); }).forEach(function (id) {
+            if (numbers[id] !== undefined) return;
+            var used = Object.keys(numbers).map(function (key) { return numbers[key]; });
+            var number = 0;
+            while (used.indexOf(number) !== -1) ++number;
+            numbers[id] = number;
+        });
+        return numbers;
+    }
+
+    // A shortcut's bank and key remain fixed while its target exists. Distinct
+    // Spaces share this namespace so visible displays never have ambiguous keys.
+    function stableShortcuts(entries, spaces, focusedSpace) {
+        var scope = spaceIdentity(focusedSpace);
+        var slots = shortcutSlots[scope] || (shortcutSlots[scope] = {});
+        var observed = {}, live = {};
+        spaces.forEach(function (space) { observed[spaceIdentity(space)] = true; });
+        entries.forEach(function (entry) {
+            entry.identity = spaceIdentity(entry.space) + ':' +
+                (entry.window !== undefined ? 'w' + entry.window : entry.frame !== undefined ? 'f' + entry.frame : 'container');
+            live[entry.identity] = true;
+        });
+        Object.keys(slots).forEach(function (id) {
+            var match = id.match(/:w(\d+)$/);
+            var numbers = windowNumbers[slots[id].space] || {};
+            // Minimized/hidden windows keep aliases even when omitted from
+            // the visible chooser. Only their complete Space query frees them.
+            if (observed[slots[id].space] && !live[id] && (!match || numbers[match[1]] === undefined)) delete slots[id];
+        });
+        entries.forEach(function (entry) {
+            if (entry.space.id === focusedSpace.id && entry.number !== undefined) {
+                // Ten local window numbers per bank; letters remain available
+                // for other visible Spaces and empty frames on every bank.
+                slots[entry.identity] = { space: spaceIdentity(entry.space),
+                    slot: Math.floor(entry.number / 10) * alphabet.length + entry.number % 10 };
+            } else if (!slots[entry.identity]) {
+                var used = Object.keys(slots).map(function (id) { return slots[id].slot; });
+                var slot = 10;
+                while (slot % alphabet.length < 10 || used.indexOf(slot) !== -1) ++slot;
+                slots[entry.identity] = { space: spaceIdentity(entry.space), slot: slot };
+            }
+            entry.shortcut = slots[entry.identity].slot;
+        });
+        entries.sort(function (a, b) { return a.shortcut - b.shortcut; });
     }
 
     function choices(entries, title, space, windows, choose, page) {
@@ -326,10 +416,22 @@ var yabaiRatpoison = (function () {
             (displays[display] || (displays[display] = [])).push(entry);
         });
         var pages = [];
+        // Partition fixed shortcut banks before applying the screen-size pagination.
+        var banks = {};
+        entries.forEach(function (entry) {
+            var bank = entry.shortcut === undefined ? 0 : Math.floor(entry.shortcut / alphabet.length);
+            (banks[bank] || (banks[bank] = [])).push(entry);
+        });
         var displayIds = Object.keys(displays).sort(function (a, b) { return Number(a) - Number(b); });
+        Object.keys(banks).sort(function (a, b) { return Number(a) - Number(b); }).forEach(function (bank) {
+        var bankDisplays = {};
+        banks[bank].forEach(function (entry) {
+            var display = entry.space ? entry.space.display : space.display;
+            (bankDisplays[display] || (bankDisplays[display] = [])).push(entry);
+        });
         var offsets = {};
         displayIds.forEach(function (display) { offsets[display] = 0; });
-        var remaining = displayIds.slice();
+        var remaining = displayIds.filter(function (display) { return bankDisplays[display]; });
         while (remaining.length) {
             var chunks = [], used = 0, count = 0;
             remaining.forEach(function (display, index) {
@@ -340,36 +442,41 @@ var yabaiRatpoison = (function () {
                 var otherGroups = Math.min(remaining.length - index - 1, Math.floor(available / 3) - 1, alphabet.length - count - 1);
                 var reserve = otherGroups * 3;
                 var capacity = (available - reserve - 2) * columns;
-                var offset = offsets[display], items = displays[display];
+                var offset = offsets[display], items = bankDisplays[display];
                 var take = Math.min(items.length - offset, capacity, alphabet.length - count - otherGroups);
-                chunks.push({ display: Number(display), continued: offset > 0, entries: items.slice(offset, offset + take) });
+                chunks.push({ display: Number(display), continued: offset > 0 || Number(bank) > 0, entries: items.slice(offset, offset + take) });
                 used += Math.ceil(take / columns) + 2;
                 count += take; offsets[display] += take;
             });
             pages.push(chunks);
-            remaining = remaining.filter(function (display) { return offsets[display] < displays[display].length; });
+            remaining = remaining.filter(function (display) { return offsets[display] < bankDisplays[display].length; });
         }
+        });
         if (!pages.length) pages.push([]);
         page = (page + pages.length) % pages.length;
         var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages.length, width),
-                     clip('1 ratpoison   2 floating   3 bsp   Shift-T toggle', width), ''];
-        var groups = [], badges = [], hint = 0;
+                     clip('r ratpoison   f floating   b bsp   Shift-T toggle', width), ''];
+        var groups = [], badges = [], selections = [], hint = 0;
         pages[page].forEach(function (group) {
             var start = lines.length;
             var heading = ' Display ' + group.display + (group.continued ? ' (continued)' : '') + ' ';
             lines.push('┌' + heading + '─'.repeat(Math.max(0, width - heading.length - 2)) + '┐');
             var cells = group.entries.map(function (entry) {
-                var key = alphabet[hint++];
+                var key = alphabet[entry.shortcut === undefined ? hint : entry.shortcut % alphabet.length];
+                ++hint;
                 bind(key, [], function () { choose(entry); });
                 if (entry.rect && (!entry.space || entry.space.id === space.id || entry.space['is-visible'])) {
                     badges.push({ key: key, rect: entry.rect, display: group.display });
                 }
-                return clip(key + ' ' + entry.label, columnWidth);
+                return clip((entry.selected ? '> ' : '  ') + key + ' ' + entry.label, columnWidth);
             });
             var usedRows = Math.ceil(cells.length / columns);
             for (var row = 0; row < usedRows; ++row) {
                 var line = cells[row];
                 if (cells[row + usedRows]) line = line.padEnd(columnWidth + 3, ' ') + cells[row + usedRows];
+                if (group.entries[row].selected) selections.push({ line: lines.length, start: 2, length: cells[row].length });
+                if (group.entries[row + usedRows] && group.entries[row + usedRows].selected)
+                    selections.push({ line: lines.length, start: 2 + columnWidth + 3, length: cells[row + usedRows].length });
                 lines.push('│ ' + line.padEnd(width - 4, ' ') + ' │');
             }
             lines.push('└' + '─'.repeat(width - 2) + '┘');
@@ -378,10 +485,10 @@ var yabaiRatpoison = (function () {
         if (!hint) lines.push('(no choices)');
         lines.push('Page ' + (page + 1) + '/' + pages.length + ' | ' + hint + '/' + entries.length +
                    ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
-        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-D/U screens');
+        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-C config');
         if (space.type === 'ratpoison') {
             lines.push('Shift-S/V split   Shift-F frames', 'Shift-W remove    Shift-O only     Shift-Z fullscreen',
-                       'Shift-R resize   Shift-J/K stack   Shift-E sizes');
+                       'Shift-R resize   Shift-J/K stack   Shift-E sizes   Shift-C config');
         }
         function previousPage() { choices(entries, title, space, windows, choose, page - 1); }
         function nextPage() { choices(entries, title, space, windows, choose, page + 1); }
@@ -392,7 +499,7 @@ var yabaiRatpoison = (function () {
         bind('space', [], nextPage);
         bind('space', ['shift'], previousPage);
         if (title === 'visible windows / frames') bind('/', [], function () { searchWindows(choose, space); });
-        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges);
+        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges, null, null, selections);
     }
 
     // A display is a container whose destination is its currently visible Space.
@@ -600,6 +707,7 @@ var yabaiRatpoison = (function () {
                 visible.forEach(function (item) {
                     var local = item.id === space.id;
                     var prefix = 'S' + item.index + ' (' + item.display + ') ';
+                    var numbers = numberWindows(item, lists[item.id]);
                     var byId = {};
                     lists[item.id].forEach(function (window) { byId[window.id] = window; });
                     function name(id) {
@@ -609,6 +717,14 @@ var yabaiRatpoison = (function () {
                     function add(entry, background) {
                         entry.space = item;
                         entry.visibleOnly = true;
+                        if (entry.window !== undefined) {
+                            entry.number = numbers[entry.window];
+                            entry.label = 'W' + entry.number + ' ' + entry.label;
+                            var owner = (item.frames || []).filter(function (frame) { return frame.windows.indexOf(entry.window) !== -1; })[0];
+                            entry.selected = local && (owner ? owner.selected && owner['active-window'] === entry.window : byId[entry.window] && byId[entry.window]['has-focus']);
+                        } else if (entry.frame !== undefined) {
+                            entry.selected = local && (item.frames || []).some(function (frame) { return frame.id === entry.frame && frame.selected; });
+                        }
                         entry.label = prefix + entry.label;
                         (background ? covered : entries).push(entry);
                     }
@@ -645,7 +761,9 @@ var yabaiRatpoison = (function () {
                     }
                 });
                 function present() {
-                    choices(entries.concat(covered), mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
+                    var allEntries = entries.concat(covered);
+                    if (mode !== 'frames') stableShortcuts(allEntries, visible, space);
+                    choices(allEntries, mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
                         if (entry.space.id !== space.id) { visit(entry, null); return; }
                         if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
                         else if (entry.window !== undefined) command(['window', '--focus', String(entry.window)]);
@@ -734,11 +852,19 @@ var yabaiRatpoison = (function () {
     }
 
     function start() {
+        if (configTask !== null) return;
         if (active) { cancel(); return; }
         if (typeof hintsActive !== 'undefined' && hintsActive && typeof cancelHints === 'function') cancelHints();
         active = true;
         load('windows');
     }
+
+    Task.run('/usr/bin/python3', [settingsBackend, 'theme'], function (task) {
+        if (task.status !== 0 || themeRevision !== 0) return;
+        var result;
+        try { result = JSON.parse(task.output); } catch (_) {}
+        if (result && result.theme && typeof result.theme === 'object') { savedTheme = result.theme; mergeTheme(); }
+    });
 
     Key.on('f', ['ctrl'], function (_, repeated) {
         if (!repeated) command(['window', '--toggle', 'windowed-fullscreen']);
@@ -746,6 +872,8 @@ var yabaiRatpoison = (function () {
     Key.on('s', ['cmd'], function (_, repeated) { if (!repeated) start(); });
     Event.on('mouseDidLeftClick', function () { if (!searching) cancel(); });
     return { cancel: cancel, start: start, configure: function (options) {
-        theme = Object.assign({}, theme, options);
+        baseTheme = Object.assign({}, baseTheme, options);
+        mergeTheme();
+        ++themeRevision;
     } };
 }());
