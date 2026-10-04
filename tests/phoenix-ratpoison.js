@@ -83,13 +83,14 @@ const remote = { id: 103, index: 3, display: 2, type: 'float', 'is-visible': tru
 const desktop = { id: 104, index: 4, display: 2, type: 'bsp', 'is-visible': false };
 const fullscreen = { id: 105, index: 5, display: 2, type: 'float', 'is-visible': false, 'is-native-fullscreen': true };
 const desktops = [space, remote, desktop, fullscreen];
+function snapshot(currentSpace = space, currentWindows = windows, otherSpaces = [], otherLists = {}) {
+    return {version:1, 'focused-space':currentSpace.id, 'focused-window':(currentWindows.find(w => w['has-focus']) || {}).id || 0,
+        spaces:[currentSpace, ...otherSpaces], windows:{[currentSpace.id]:currentWindows,...otherLists}, displays};
+}
 function refresh(currentSpace = space, currentWindows = windows) {
-    const batched = tasks[0] && tasks[0].args.includes('id,uuid,index,display,type,has-focus,is-visible,frames');
+    if (tasks[0] && tasks[0].args.includes('--menu-snapshot')) { reply(snapshot(currentSpace,currentWindows)); return; }
     reply(currentSpace); reply(currentWindows);
-    if (tasks[0] && tasks[0].args.join(' ') === '-m query --spaces') {
-        reply([currentSpace]);
-    }
-    if (batched && tasks[0] && tasks[0].args.join(' ') === '-m query --displays') reply(displays);
+    if (tasks[0] && tasks[0].args.join(' ') === '-m query --spaces') reply([currentSpace]);
 }
 // Existing independent scenarios use fresh Phoenix sessions. Stability regressions
 // below reopen with press/refresh so they deliberately retain the same session.
@@ -259,9 +260,8 @@ const remoteWindows = [{ id: 30, app: 'Browser', title: 'Remote' }, { id: 40, ap
 function visibleMenu(other = remoteFrames, otherWindows = remoteWindows, mode) {
     if (mode) { open(single, [windows[0]]); press(mode, ['shift']); }
     else { resetShortcuts(); press('s', ['cmd']); }
-    reply([single, other, desktop]); reply([windows[0]]);
-    expectCommand(['query', '--windows', 'id,pid,app,title,frame,has-focus,is-minimized,is-hidden', '--space', '3']); reply(otherWindows);
-    if (tasks[0] && tasks[0].args.join(' ') === '-m query --displays') reply(displays);
+    expectCommand(['query', '--menu-snapshot']);
+    reply(snapshot(single,[windows[0]],[other],{[other.id]:otherWindows}));
     assert.equal(tasks.length, 0); // The hidden S4 was never queried.
 }
 visibleMenu();
@@ -293,10 +293,10 @@ expectCommand(['space', '3', '--focus-frame', '7']); reply(null); refresh(remote
 visibleMenu(); press('c'); reply([single, { ...remoteFrames, 'is-visible': false }]);
 assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 // Late remote queries cannot reopen a cancelled chooser.
-press('s', ['cmd']); reply([single, remoteFrames]); reply([windows[0]]);
-press('escape'); reply(remoteWindows); idle();
+press('s', ['cmd']);
+press('escape'); reply(snapshot(single,[windows[0]],[remoteFrames],{[remoteFrames.id]:remoteWindows})); idle();
 // Display order is physical-index order even when display 2 has focus.
-press('s', ['cmd']); reply([{...remote, 'has-focus':true},{...single,'has-focus':false}]); reply([remoteWindows[0]]); reply([windows[0]]); reply(displays);
+press('s', ['cmd']); reply(snapshot({...remote,'has-focus':true},[remoteWindows[0]],[{...single,'has-focus':false}],{[single.id]:[windows[0]]}));
 assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2]);
 press('0'); expectCommand(['window', '--focus', '30']); reply(null); idle();
 // Labels use existing frame/window geometry and exactly the current page's keys.
@@ -617,3 +617,11 @@ refresh(withoutTerminal,[windows[1]]);
 assert.equal(tasks.length,0);
 assert.equal(renderers.size,1);
 press('escape'); idle();
+
+// A partial or unknown schema cannot enable cached selection bindings.
+for (const bad of [{version:2}, {...snapshot(),windows:{}}, {...snapshot(),displays:null}]) {
+    resetShortcuts(); press('s',['cmd']); reply(bad);
+    assert.ok(![...keys.values()].some(k => k.key === '0' && !k.mods.length));
+    press('escape'); idle();
+}
+console.log('Compact snapshot schema validation and single-request chooser passed');

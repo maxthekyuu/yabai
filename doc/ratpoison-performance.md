@@ -288,3 +288,40 @@ It should remain an optional new query, with existing query commands and JSON
 schemas preserved. No implementation or latency claim is made for this proposal.
 Measure the remaining process/IPC overhead before deciding whether the additional
 API surface is worthwhile.
+
+## Compact snapshot implementation and measurements
+
+`yabai -m query --menu-snapshot` now supplies the normal chooser and frame menu.
+Its version-1 schema is `{version, focused-space, focused-window, displays,
+spaces, windows}`. `windows` is keyed by decimal Space ID, not desktop index.
+Only the visible Space on each display is included, with its frame stack data.
+It reuses existing serializers with minimal flags and the request-local topology
+cache. Existing query APIs and hidden-Space global search are unchanged.
+
+One daemon handler prepares the response; this reduces inter-request skew without
+claiming atomicity against macOS. Missing focused/visible topology produces a
+retriable error before any JSON is written. The UI validates the schema version,
+focused Space, display array, frame arrays and per-Space window arrays before
+binding selections. Late replies remain generation-guarded.
+
+Live JS orchestration measurements, 25 samples per batch, with two visible
+Spaces, five shortcuts and a 14-line menu:
+
+| Path | Median ms | p95 ms |
+|---|---:|---:|
+| Previous Space + per-Space windows + display requests | 19.80 | 35.52 |
+| Compact snapshot and completed chooser payload | 8.55 | 9.48 |
+| Compact snapshot CLI request alone | 8.15 | 9.15 |
+
+The measured median improvement is 11.25 ms (about 57%). These are sequential
+live batches around installation, not a controlled physical key-to-screen test.
+Cached first display still follows the existing resident-renderer path; this
+change makes fresh content and buffered selection actions ready sooner.
+
+Validation: 22 core tests, Phoenix navigation/search/move/cache tests, partial and
+unsupported snapshot schema cases, and `python3 tests/menu-snapshot.py` passed.
+The read-only integration test compares the new response with existing scoped
+queries, including windows on each visible Space, displays, frames and focus.
+Run it on a settled desktop. `tests/profile-prefix.py` includes the new endpoint
+in its daemon/CLI measurements. Raw orchestration reports are
+`/tmp/menu-snapshot-before.json` and `/tmp/menu-snapshot-after.json`.

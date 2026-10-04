@@ -42,8 +42,6 @@ var yabaiRatpoison = (function () {
             Phoenix.log('ratpoison-latency ' + JSON.stringify({stage:stage, elapsed_ms:Date.now() - latencyStart, generation:generation}));
     }
 
-    var spaceFields = 'id,uuid,index,display,type,has-focus,is-visible,frames';
-    var windowFields = 'id,pid,app,title,frame,has-focus,is-minimized,is-hidden';
 
     function ensureResident() {
         if (residentTask !== null) return;
@@ -95,34 +93,31 @@ var yabaiRatpoison = (function () {
 
     function fetchSnapshot(callback, attempt, valid) {
         attempt = attempt || 0;
-        run(['query', '--spaces', spaceFields], function (task) {
+        run(['query', '--menu-snapshot'], function (task) {
             if (valid && !valid()) return;
-            var spaces;
-            try { spaces = JSON.parse(task.output); } catch (_) {}
-            if (task.status !== 0 || !Array.isArray(spaces)) {
-                if (attempt < 3) { Timer.after(0.05 * (attempt + 1), function () { if (!valid || valid()) fetchSnapshot(callback, attempt + 1, valid); }); return; }
+            var snapshot;
+            try { snapshot = JSON.parse(task.output); } catch (_) {}
+            var spaces = snapshot && snapshot.spaces;
+            var focused = Array.isArray(spaces) && spaces.filter(function (space) {
+                return space && space.id === snapshot['focused-space'];
+            })[0];
+            var complete = snapshot && snapshot.version === 1 && focused &&
+                Array.isArray(snapshot.displays) && snapshot.windows &&
+                spaces.every(function (space) {
+                    return space && typeof space.id === 'number' && space.index > 0 &&
+                        Array.isArray(snapshot.windows[space.id]) &&
+                        (space.type !== 'ratpoison' || Array.isArray(space.frames));
+                });
+            if (task.status !== 0 || !complete) {
+                if (attempt < 3) {
+                    Timer.after(0.05 * (attempt + 1), function () {
+                        if (!valid || valid()) fetchSnapshot(callback, attempt + 1, valid);
+                    });
+                    return;
+                }
                 callback(null); return;
             }
-            var focused = spaces.filter(function (space) { return space['has-focus']; })[0];
-            if (!focused) { callback(null); return; }
-            var visible = spaces.filter(function (space) { return space['is-visible'] || space.id === focused.id; });
-            var model = {spaces:spaces, space:focused, lists:{}, displays:[]};
-            var needsDisplays = visible.some(function (space) { return space.type !== 'ratpoison'; });
-            var pending = visible.length + (needsDisplays ? 1 : 0), failed = false;
-            function done() { if (--pending === 0) callback(failed ? null : model); }
-            visible.forEach(function (space) {
-                run(['query', '--windows', windowFields, '--space', String(space.index)], function (task) {
-                    var windows; try { windows = JSON.parse(task.output); } catch (_) {}
-                    if (task.status !== 0 || !Array.isArray(windows)) failed = true;
-                    else model.lists[space.id] = windows;
-                    done();
-                });
-            });
-            if (needsDisplays) run(['query', '--displays'], function (task) {
-                try { model.displays = JSON.parse(task.output); } catch (_) { failed = true; }
-                if (task.status !== 0 || !Array.isArray(model.displays)) failed = true;
-                done();
-            });
+            callback({spaces:spaces, space:focused, lists:snapshot.windows, displays:snapshot.displays});
         });
     }
 
@@ -969,7 +964,7 @@ var yabaiRatpoison = (function () {
         if (mode === 'windows' || mode === 'frames') {
             fetchSnapshot(function (model) {
                 if (!active || generation !== current) return;
-                if (!model) { error('invalid space query response after retries; check yabai logs'); return; }
+                if (!model) { error('menu snapshot unavailable or invalid; check the yabai build and logs'); return; }
                 latency('fresh-data');
                 var space = model.space, windows = model.lists[space.id];
                 if (queuedDirection) {

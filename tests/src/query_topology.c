@@ -70,3 +70,15 @@ TEST_FUNC(query_topology_selectors,
     fclose(output);
     topology_fixture = NULL;
 )
+
+TEST_FUNC(menu_snapshot_rejects_options,
+    FILE *output = tmpfile();
+    char invalid[] = "query\0--menu-snapshot\0--space\0" "1\0\0";
+    handle_message(output, invalid);
+    rewind(output);
+    char response[256] = {0};
+    fread(response, 1, sizeof(response)-1, output);
+    TEST_CHECK(strstr(response, "accepts no selectors") != NULL, true);
+    TEST_CHECK(query_topology.depth, 0);
+    fclose(output);
+)

@@ -49,7 +49,7 @@ finally: proc.terminate();proc.wait(timeout=3)
 sp='id,uuid,index,display,type,has-focus,is-visible,frames';wp='id,pid,app,title,frame,has-focus,is-minimized,is-hidden'
 spaces=query(['query','--spaces']);visible=[s for s in spaces if s['is-visible']]
 report['visible_spaces']=[s['index'] for s in visible]
-for label,args in [('spaces_full',['query','--spaces']),('spaces_slim',['query','--spaces',sp]),('all_windows_full',['query','--windows'])]+[('visible_windows_'+str(s['index']),['query','--windows',wp,'--space',str(s['index'])]) for s in visible]:
+for label,args in [('compact_menu',['query','--menu-snapshot']),('spaces_full',['query','--spaces']),('spaces_slim',['query','--spaces',sp]),('all_windows_full',['query','--windows'])]+[('visible_windows_'+str(s['index']),['query','--windows',wp,'--space',str(s['index'])]) for s in visible]:
  direct=[];cli=[]
  for i in range(25):
   t=time.perf_counter();query(args);direct.append((time.perf_counter()-t)*1000)

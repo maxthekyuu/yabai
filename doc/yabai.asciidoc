@@ -541,6 +541,16 @@ COMMAND
 *--windows*::
     Retrieve information about windows.
 
+*--menu-snapshot*::
+    Retrieve a versioned compact snapshot for a visible-Space window chooser. +
+    Accepts no selectors or property list. The response contains `version` (1),
+    `focused-space` (Space ID), `focused-window` (window ID), `displays`, `spaces`,
+    and `windows` (an object mapping decimal Space IDs to arrays of window records). +
+    Includes the current Space on each active display, with frame/stack data;
+    hidden Spaces are excluded. Window records omit redundant Space membership. +
+    Collection uses one query handler and request-local topology snapshot, but
+    external macOS changes are not atomic. Transient topology failures return an error.
+
 ARGUMENT
 ^^^^^^^^
 

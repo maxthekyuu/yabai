@@ -518,3 +518,11 @@ completion and renderer acknowledgment using `Phoenix.log`, without window title
 Disable with `profileLatency:false`. A renderer acknowledgment is not a measured
 physical display presentation timestamp. Event names follow the
 [Phoenix event API](https://kasper.github.io/phoenix/api/events/).
+
+The chooser and Shift-F now fetch their model with one
+`yabai -m query --menu-snapshot` request. Its version-1 response includes visible
+Space records and frames, display bounds, focused IDs, and window arrays keyed by
+Space ID. The UI retries incomplete or unavailable snapshots and never executes
+buffered choices against an invalid snapshot. This requires the matching daemon
+build. Global `/` search continues using all-Space queries, so hidden desktops
+remain searchable. Existing query commands and schemas remain available.

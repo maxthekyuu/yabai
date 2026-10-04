@@ -817,6 +817,17 @@ Retrieve information about spaces.
 .RS 4
 Retrieve information about windows.
 .RE
+.sp
+\fB\-\-menu-snapshot\fP
+.RS 4
+Retrieve a versioned compact snapshot for a visible-Space window chooser. Accepts no selectors or property list.
+.sp
+The response contains version (1), focused-space (Space ID), focused-window (window ID), displays, spaces, and windows (an object mapping decimal Space IDs to arrays of window records).
+.sp
+Includes the current Space on each active display, with frame/stack data; hidden Spaces are excluded. Window records omit redundant Space membership.
+.sp
+Collection uses one query handler and request-local topology snapshot, but external macOS changes are not atomic. Transient topology failures return an error.
+.RE
 .SS "ARGUMENT"
 .sp
 \fB\-\-display\fP [\fI<DISPLAY_SEL>\fP]

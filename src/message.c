@@ -198,6 +198,7 @@ extern bool g_verbose;
 #define COMMAND_QUERY_DISPLAYS "--displays"
 #define COMMAND_QUERY_SPACES   "--spaces"
 #define COMMAND_QUERY_WINDOWS  "--windows"
+#define COMMAND_QUERY_MENU     "--menu-snapshot"
 
 #define ARGUMENT_QUERY_DISPLAY "--display"
 #define ARGUMENT_QUERY_SPACE   "--space"
@@ -2656,7 +2657,13 @@ static void handle_domain_query(FILE *rsp, struct token domain, char *message)
     TIME_FUNCTION;
 
     struct token command = get_token(&message);
-    if (token_equals(command, COMMAND_QUERY_DISPLAYS)) {
+    if (token_equals(command, COMMAND_QUERY_MENU)) {
+        if (token_is_valid(get_token(&message))) {
+            daemon_fail(rsp, "menu snapshot accepts no selectors or property list.\n");
+        } else if (!menu_snapshot_query(rsp)) {
+            daemon_fail(rsp, "could not build menu snapshot; display topology may be changing.\n");
+        }
+    } else if (token_equals(command, COMMAND_QUERY_DISPLAYS)) {
         struct properties properties = parse_properties(rsp, get_token(&message), display_property_val, display_property_str, array_count(display_property_str));
         if (properties.did_error) return;
 

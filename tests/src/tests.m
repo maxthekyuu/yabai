@@ -20,6 +20,7 @@ typedef TEST_SIG(function);
 
 #define TEST_ENTRY(name) { #name, test_##name },
 #define TEST_LIST                                              \
+    TEST_ENTRY(menu_snapshot_rejects_options)                   \
     TEST_ENTRY(query_topology_lifetime)                         \
     TEST_ENTRY(query_topology_selectors)                        \
     TEST_ENTRY(window_display_move_geometry)                   \
