@@ -3223,7 +3223,9 @@ void handle_message(FILE *rsp, char *message)
     } else if (token_equals(domain, DOMAIN_WINDOW)) {
         handle_domain_window(rsp, domain, message);
     } else if (token_equals(domain, DOMAIN_QUERY)) {
+        query_topology_begin();
         handle_domain_query(rsp, domain, message);
+        query_topology_end();
     } else if (token_equals(domain, DOMAIN_RULE)) {
         handle_domain_rule(rsp, domain, message);
     } else if (token_equals(domain, DOMAIN_SIGNAL)) {

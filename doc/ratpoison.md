@@ -443,11 +443,13 @@ For this local installation, the existing certificate is:
 ```sh
 make install
 make sign SIGNING_IDENTITY="Org Time Tracker Local Signing"
-cp bin/yabai /opt/homebrew/bin/yabai
+install -m 755 bin/yabai /opt/homebrew/bin/.yabai-update
+mv -f /opt/homebrew/bin/.yabai-update /opt/homebrew/bin/yabai
 yabai --restart-service
 ```
 
-`make install` builds the release executable locally; the copy installs it.
+`make install` builds the release executable locally; staging and renaming the
+signed executable installs it atomically without overwriting the running file.
 Switching from ad-hoc signing to certificate signing can require one final
 approval in System Settings → Privacy & Security → Accessibility. If toggling
 its existing entry does not work, remove it and add `/opt/homebrew/bin/yabai`

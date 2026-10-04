@@ -237,3 +237,54 @@ Validation: Phoenix navigation/stack/search/move regressions, cache/stale-bindin
 topology tests, 16 native renderer/socket tests, and 9 configuration tests passed.
 Dock reconnect with actual hardware and high-speed key-to-screen capture were
 not performed. Changes are installed locally; nothing has been pushed.
+
+## Request-local topology reuse
+
+The follow-up daemon change reuses the result of `SLSCopyManagedDisplaySpaces`
+within a single `query` request. Eight existing call sites in display enumeration
+and Space selectors use a small internal wrapper. Copy/retain ownership remains
+unchanged for callers. The cache is lazy and thread-local, supports nested scopes,
+and is released after the query, including early parser returns. A failed fetch
+is remembered only for that request. Commands and event handlers outside queries
+still fetch fresh topology. There is no cross-request cache to invalidate after
+display disconnects, and no public command, field or selector was changed.
+
+Tests cover one fetch per scope, retained references, nested scopes, failed
+fetches, topology changes between requests, uncached non-query access, existing
+Space-selector numbering/order, and early parser exits. All 21 core tests pass.
+The universal release was signed with the existing certificate and installed;
+Accessibility permission was retained and six saved ratpoison layouts restored.
+
+Sixty live direct-socket samples per query before and after installation:
+
+| Query | Before median / p95 ms | After median / p95 ms |
+|---|---:|---:|
+| Space IDs and indices | 2.226 / 5.558 | 0.400 / 0.628 |
+| Minimal chooser Space data | 3.060 / 10.161 | 1.119 / 3.310 |
+| Full Space data | 3.662 / 9.109 | 1.910 / 2.490 |
+| Full window data | 10.716 / 18.421 | 5.725 / 6.684 |
+
+These are separate live batches around a daemon restart, not controlled paired
+microbenchmarks. They exclude CLI process startup and UI rendering. Raw results
+are `/tmp/topology-before.json` and `/tmp/topology-after.json`; the harness is
+`/tmp/profile-topology.py`. This optimization is isolated from the UI changes to
+keep future upstream merges straightforward.
+
+### Compact menu snapshot: proposed next step, not implemented
+
+An additive query could return, in one response, the focused Space/window,
+visible displays and Spaces, ratpoison frames and stack membership, and the
+minimal window metadata needed by the normal chooser. Phoenix would still assign
+shortcut keys and render the menu. Hidden-Space search could keep its existing
+separate query.
+
+The benefit would be replacing one Space request plus a window request per
+visible Space (and sometimes a display request) with a single CLI launch/socket
+round trip. Collection would run in one daemon event-loop handler using one
+request-local topology snapshot. This gives a more coherent in-memory result;
+it would not make macOS window state atomic against external changes.
+
+It should remain an optional new query, with existing query commands and JSON
+schemas preserved. No implementation or latency claim is made for this proposal.
+Measure the remaining process/IPC overhead before deciding whether the additional
+API surface is worthwhile.

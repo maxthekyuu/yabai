@@ -501,7 +501,7 @@ int space_manager_mission_control_index(uint64_t sid)
     uint64_t result = 0;
     int desktop_cnt = 1;
 
-    CFArrayRef display_spaces_ref = SLSCopyManagedDisplaySpaces(g_connection);
+    CFArrayRef display_spaces_ref = query_topology_copy();
     if (!display_spaces_ref) return 0;
 
     int display_spaces_count = CFArrayGetCount(display_spaces_ref);
@@ -531,7 +531,7 @@ uint64_t space_manager_mission_control_space(int desktop_id)
     uint64_t result = 0;
     int desktop_cnt = 1;
 
-    CFArrayRef display_spaces_ref = SLSCopyManagedDisplaySpaces(g_connection);
+    CFArrayRef display_spaces_ref = query_topology_copy();
     if (!display_spaces_ref) return 0;
 
     int display_spaces_count = CFArrayGetCount(display_spaces_ref);
@@ -567,7 +567,7 @@ uint64_t space_manager_prev_space(uint64_t sid)
     uint64_t p_sid = 0;
     uint64_t n_sid = 0;
 
-    CFArrayRef display_spaces_ref = SLSCopyManagedDisplaySpaces(g_connection);
+    CFArrayRef display_spaces_ref = query_topology_copy();
     if (!display_spaces_ref) return 0;
 
     int display_spaces_count = CFArrayGetCount(display_spaces_ref);
@@ -596,7 +596,7 @@ uint64_t space_manager_next_space(uint64_t sid)
     uint64_t n_sid = 0;
     bool found_sid = false;
 
-    CFArrayRef display_spaces_ref = SLSCopyManagedDisplaySpaces(g_connection);
+    CFArrayRef display_spaces_ref = query_topology_copy();
     if (!display_spaces_ref) return 0;
 
     int display_spaces_count = CFArrayGetCount(display_spaces_ref);
@@ -624,7 +624,7 @@ uint64_t space_manager_first_space(void)
 {
     uint64_t sid = 0;
 
-    CFArrayRef display_spaces_ref = SLSCopyManagedDisplaySpaces(g_connection);
+    CFArrayRef display_spaces_ref = query_topology_copy();
     if (!display_spaces_ref) return 0;
 
     CFDictionaryRef display_ref = CFArrayGetValueAtIndex(display_spaces_ref, 0);
@@ -642,7 +642,7 @@ uint64_t space_manager_last_space(void)
 {
     uint64_t sid = 0;
 
-    CFArrayRef display_spaces_ref = SLSCopyManagedDisplaySpaces(g_connection);
+    CFArrayRef display_spaces_ref = query_topology_copy();
     if (!display_spaces_ref) return 0;
 
     int display_spaces_count = CFArrayGetCount(display_spaces_ref);

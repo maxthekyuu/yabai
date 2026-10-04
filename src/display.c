@@ -194,7 +194,7 @@ int display_space_count(uint32_t did)
     CFStringRef uuid = display_uuid(did);
     if (!uuid) goto out;
 
-    CFArrayRef display_spaces_ref = SLSCopyManagedDisplaySpaces(g_connection);
+    CFArrayRef display_spaces_ref = query_topology_copy();
     if (!display_spaces_ref) goto err;
 
     int display_spaces_count = CFArrayGetCount(display_spaces_ref);
@@ -222,7 +222,7 @@ uint64_t *display_space_list(uint32_t did, int *count)
     CFStringRef uuid = display_uuid(did);
     if (!uuid) goto out;
 
-    CFArrayRef display_spaces_ref = SLSCopyManagedDisplaySpaces(g_connection);
+    CFArrayRef display_spaces_ref = query_topology_copy();
     if (!display_spaces_ref) goto err;
 
     int display_spaces_count = CFArrayGetCount(display_spaces_ref);

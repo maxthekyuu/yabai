@@ -83,6 +83,7 @@
 #include "event_signal.c"
 #include "workspace.m"
 #include "rule.c"
+#include "query_topology.c"
 #include "message.c"
 #include "display.c"
 #include "space.c"

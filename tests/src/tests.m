@@ -16,9 +16,12 @@ typedef TEST_SIG(function);
 #include "ratpoison_layout.c"
 #include "frame_border.c"
 #include "window_geometry.c"
+#include "query_topology.c"
 
 #define TEST_ENTRY(name) { #name, test_##name },
 #define TEST_LIST                                              \
+    TEST_ENTRY(query_topology_lifetime)                         \
+    TEST_ENTRY(query_topology_selectors)                        \
     TEST_ENTRY(window_display_move_geometry)                   \
     TEST_ENTRY(window_geometry_fallback)                       \
     TEST_ENTRY(display_area_is_in_direction)                   \
