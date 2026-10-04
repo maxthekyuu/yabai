@@ -6,10 +6,14 @@ const keys = new Map();
 const tasks = [];
 const renderers = new Map();
 const timers = new Map();
+const events = new Map();
+const residentMessages = [];
 let nextId = 1;
 let hintCancellations = 0;
 let screen = { x: 0, y: 0, width: 1400, height: 1000 };
 let lastMenu;
+let resident = null;
+const residentCallbacks = new Map();
 const context = {
     Key: {
         on(key, mods, callback) {
@@ -22,12 +26,20 @@ const context = {
         after(seconds, callback) { const id = nextId++; callback.delay = seconds; timers.set(id, callback); return id; },
         off(id) { timers.delete(id); }
     },
-    Event: { on() {} },
+    Event: { on(name, callback) { events.set(name, callback); } },
     Task: {
         run(path, args, callback) {
             const id = nextId++;
             if (path === '/usr/bin/python3' && args[1] === 'theme') { callback({status:0,output:'{\"theme\":{}}'}); return id; }
+            if (path.endsWith('yabai-prefix-client')) {
+                const message = JSON.parse(args[1]); residentMessages.push(message);
+                if (message.action === 'hide' || message.action === 'prepare') renderers.delete(resident);
+                if (message.payload) lastMenu = message.payload;
+                if (message.action === 'show' || message.action === 'update') renderers.set(resident, residentCallbacks.get(resident));
+                callback({status:0}); return id;
+            }
             if (path === '/usr/bin/env' && args[0].endsWith('yabai-prefix')) {
+                if (args[1] === '--serve') { resident = id; residentCallbacks.set(id, callback); return id; }
                 if (args[1] === '--configure') { tasks.push({path,args,callback}); return id; }
                 lastMenu = JSON.parse(args[args.length - 1]);
                 if (args[1] === '--update') { callback({ status: 0 }); return id; }
@@ -55,6 +67,7 @@ function press(key, mods = []) {
 function reply(value, status = 0) {
     const task = tasks.shift();
     assert.ok(task);
+    if (task.args[1] === 'query' && task.args[2] === '--spaces' && task.args[3] && !task.args[3].startsWith('--') && !Array.isArray(value) && value && value.id) value = [{...value, 'has-focus':true}];
     task.callback({ status, output: JSON.stringify(value), error: status ? 'failure' : '' });
 }
 function expectCommand(args) { assert.deepEqual(Array.from(tasks[0].args), ['-m', ...args]); }
@@ -71,17 +84,18 @@ const desktop = { id: 104, index: 4, display: 2, type: 'bsp', 'is-visible': fals
 const fullscreen = { id: 105, index: 5, display: 2, type: 'float', 'is-visible': false, 'is-native-fullscreen': true };
 const desktops = [space, remote, desktop, fullscreen];
 function refresh(currentSpace = space, currentWindows = windows) {
+    const batched = tasks[0] && tasks[0].args.includes('id,uuid,index,display,type,has-focus,is-visible,frames');
     reply(currentSpace); reply(currentWindows);
     if (tasks[0] && tasks[0].args.join(' ') === '-m query --spaces') {
         reply([currentSpace]);
-        if (tasks[0] && tasks[0].args.join(' ') === '-m query --displays') reply(displays);
     }
+    if (batched && tasks[0] && tasks[0].args.join(' ') === '-m query --displays') reply(displays);
 }
 // Existing independent scenarios use fresh Phoenix sessions. Stability regressions
 // below reopen with press/refresh so they deliberately retain the same session.
 function resetShortcuts() {
     context.yabaiRatpoison.cancel();
-    keys.clear();
+    keys.clear(); timers.clear();
     vm.runInNewContext(fs.readFileSync('examples/phoenix-ratpoison.js', 'utf8'), context);
 }
 function open(currentSpace = space, currentWindows = windows) { resetShortcuts(); press('s', ['cmd']); refresh(currentSpace, currentWindows); }
@@ -129,7 +143,7 @@ open({ ...space, type: 'float' }); press('l'); expectCommand(['window', '--focus
 open(); press('escape'); assert.equal(tasks.length, 0); idle();
 press('s', ['cmd']); press('escape'); reply(space); assert.equal(tasks.length, 0); idle();
 press('s', ['cmd']); press('s', ['cmd']); reply(space); idle();
-open(); assert.equal(timers.size, 0); press('escape'); idle();
+open(); assert.ok([...timers.values()].every(timer => timer.delay === 0.08)); press('escape'); idle();
 // Unexpected renderer exit must also disable invisible shortcuts.
 open(); const [rendererId, rendererCallback] = [...renderers.entries()][0];
 renderers.delete(rendererId); rendererCallback({ status: 0 }); idle();
@@ -221,7 +235,7 @@ assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 destinations('m'); press('4'); press('escape'); reply(displays); assert.equal(tasks.length, 0); idle();
 // Cancelling a pending completion poll prevents a later timer from focusing anything.
 destinations('m', { ...space, type: 'float' }); press('2'); resolveDestination(); reply(null); reply({ space: 2 });
-press('escape'); for (const callback of [...timers.values()]) callback(); timers.clear();
+press('escape'); for (const callback of [...timers.values()].filter(t => t.delay !== 0.08)) callback(); timers.clear();
 assert.equal(tasks.length, 0); idle();
 // Completion polling is bounded and never follows a move that did not happen.
 destinations('m', { ...space, type: 'float' }); press('2'); resolveDestination(); reply(null);
@@ -245,9 +259,8 @@ const remoteWindows = [{ id: 30, app: 'Browser', title: 'Remote' }, { id: 40, ap
 function visibleMenu(other = remoteFrames, otherWindows = remoteWindows, mode) {
     if (mode) { open(single, [windows[0]]); press(mode, ['shift']); }
     else { resetShortcuts(); press('s', ['cmd']); }
-    reply(single); reply([windows[0]]);
-    expectCommand(['query', '--spaces']); reply([single, other, desktop]);
-    expectCommand(['query', '--windows', '--space', '3']); reply(otherWindows);
+    reply([single, other, desktop]); reply([windows[0]]);
+    expectCommand(['query', '--windows', 'id,pid,app,title,frame,has-focus,is-minimized,is-hidden', '--space', '3']); reply(otherWindows);
     if (tasks[0] && tasks[0].args.join(' ') === '-m query --displays') reply(displays);
     assert.equal(tasks.length, 0); // The hidden S4 was never queried.
 }
@@ -280,10 +293,10 @@ expectCommand(['space', '3', '--focus-frame', '7']); reply(null); refresh(remote
 visibleMenu(); press('c'); reply([single, { ...remoteFrames, 'is-visible': false }]);
 assert.equal(tasks.length, 0); context.yabaiRatpoison.cancel(); idle();
 // Late remote queries cannot reopen a cancelled chooser.
-press('s', ['cmd']); reply(single); reply([windows[0]]); reply([single, remoteFrames]);
+press('s', ['cmd']); reply([single, remoteFrames]); reply([windows[0]]);
 press('escape'); reply(remoteWindows); idle();
 // Display order is physical-index order even when display 2 has focus.
-press('s', ['cmd']); reply(remote); reply([remoteWindows[0]]); reply([remote, single]); reply([windows[0]]);
+press('s', ['cmd']); reply([{...remote, 'has-focus':true},{...single,'has-focus':false}]); reply([remoteWindows[0]]); reply([windows[0]]); reply(displays);
 assert.deepEqual(Array.from(lastMenu.groups, g => g.display), [1, 2]);
 press('0'); expectCommand(['window', '--focus', '30']); reply(null); idle();
 // Labels use existing frame/window geometry and exactly the current page's keys.
@@ -562,4 +575,45 @@ open(overlaySpace, overlayWindows);
 assert.equal(lastMenu.badges.find(b => b.key === '0').state, 'focused');
 assert.equal(lastMenu.badges.find(b => b.key === '1').state, 'normal');
 assert.equal(lastMenu.badges.find(b => b.key === '2').state, 'front');
+press('escape'); idle();
+
+// Warm cached display is immediate, but stale digit bindings never execute.
+open();
+const residentBefore = resident;
+press('escape');
+const background = [...timers.entries()].find(([, timer]) => timer.delay === 0.08);
+assert.ok(background); timers.delete(background[0]); background[1](); refresh();
+assert.equal(renderers.size, 0);
+assert.equal(keys.size, 2);
+press('s', ['cmd']);
+assert.ok(lastMenu.groups.length > 0);
+assert.equal(resident, residentBefore);
+assert.ok([...keys.values()].some(k => k.key === '0' && !k.mods.length));
+press('0');
+assert.ok(tasks.every(t => t.args[1] === 'query'), 'cached input waits for validation');
+refresh();
+expectCommand(['window','--focus','10']); reply(null); idle();
+// Display invalidation discards geometry before another open.
+events.get('screensDidChange')();
+press('s', ['cmd']); assert.ok(lastMenu.text.includes('Loading windows'));
+press('escape'); reply(space); idle();
+console.log('Resident reuse, background preparation, stale-key guards and topology invalidation passed');
+
+// A Phoenix config reload explicitly retires the preceding renderer.
+const saved = new Map();
+context.Storage = {get:key => saved.get(key),set:(key,value) => saved.set(key,value)};
+resetShortcuts();
+const firstToken = saved.get('yabaiRatpoisonRenderer');
+assert.ok(firstToken);
+const countBeforeReload = residentMessages.filter(m => m.action === 'quit').length;
+resetShortcuts();
+assert.equal(residentMessages.filter(m => m.action === 'quit').length, countBeforeReload + 1);
+assert.notEqual(saved.get('yabaiRatpoisonRenderer'), firstToken);
+
+// Reusing a digit for a different window must not redirect buffered input.
+open(); press('escape'); press('s',['cmd']); press('0');
+const withoutTerminal = {...space,frames:space.frames.map(f => f.id === 0 ? {...f,windows:[20],'active-window':20} : f)};
+refresh(withoutTerminal,[windows[1]]);
+assert.equal(tasks.length,0);
+assert.equal(renderers.size,1);
 press('escape'); idle();

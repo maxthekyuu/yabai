@@ -135,3 +135,105 @@ profile-prefix.js, profile-renderer.py, profile-query-options.py, profile-slim.p
 prefix-query-profile.json, prefix-render-profile.json, prefix-update-profile.json.
 The captured payload is mode 0600 and remains outside the repository because it
 contains window titles. Production binaries and configuration were not replaced.
+
+## Implemented optimizations and follow-up measurements
+
+All five priorities above are implemented in the normal chooser path:
+
+- Resident Cocoa renderer, parent-lifetime and config-reload cleanup, hidden panel reuse.
+- A framework-free C client and private Unix socket; bounded messages/timeouts,
+  same-user validation, revisions and coalesced updates.
+- Event-triggered background preparation, cached first display, fresh-query
+  validation of buffered selection keys, immediate invalidation on topology changes.
+- One minimal all-Spaces query followed by concurrent minimal queries for visible
+  Spaces. Window `space` is omitted because the containing Space is already known.
+- Cached fonts, regexes, attributed overlay labels and hint views; equal prepared
+  payloads bypass reconstruction entirely.
+
+The normal prefix binding still belongs to Phoenix. Search and configuration
+keep their separate process lifecycle. No yabai daemon replacement was needed.
+
+### Results
+
+A repeatable synthetic native fixture has eight keys, four overlay centers and
+roughly the same menu size as the original test. It exercises real native socket
+requests, drawing and acknowledgments with off-screen panels.
+
+| Component | Samples | Median ms | p95 ms |
+|---|---:|---:|---:|
+| Cached show, including C client launch and acknowledgment | 100 | 7.22 | 9.84 |
+| Changed-content update, including client and acknowledgment | 100 | 7.38 | 10.84 |
+| Changed-content render handler only | 100 | 0.38 | 1.10 |
+| New JS live data preparation (12 keys, 2 visible Spaces) | 25 | 21.27 | 33.44 |
+| Old JS replay on comparable live setup (12 keys, same visible Spaces) | 25 | 58.99 | 90.78 |
+
+Focus changed between live batches, so these are not perfectly paired trials.
+An earlier new-path batch on eight keys measured 25.5 ms before removing the
+redundant window-Space property. The opening-cache path no longer waits for this
+query work; buffered selection actions do. The first prepare on the synthetic server took
+98 ms, now paid when prewarming rather than on every prefix invocation.
+
+A separate live-payload native run measured 7.12 ms median / 10.01 ms p95 for
+cached show, and 8.37 / 21.45 ms for changed updates. Its maximum changed update
+was 112 ms, so occasional system scheduling outliers remain. Do not interpret
+medians as hard latency guarantees.
+
+After 100 show/hide cycles and 100 updates, the synthetic renderer used 49,952 KB
+RSS. CPU time and RSS remained unchanged across a two-second hidden idle check.
+The installed renderer was approximately 53 MB while hidden. This is a short
+idle observation, not a long-duration leak or energy test.
+
+Run `python3 tests/profile-prefix.py` after building both helpers to reproduce
+native lifecycle timings and direct-socket versus CLI yabai measurements. It
+uses off-screen synthetic labels and prints no user window titles. The JS query
+harness for this session remains `/tmp/profile-prefix.js`; its private payload
+and timing JSON files remain outside the repository.
+
+### Yabai's remaining contribution
+
+Direct socket measurements omit CLI spawning but include daemon queueing, macOS
+calls, serialization and socket transfer. They do not isolate pure daemon CPU.
+Twenty-five samples per operation, on two visible Spaces:
+
+| Query | Direct socket median ms | CLI median ms |
+|---|---:|---:|
+| All Spaces, full fields | 11.13 | 22.19 |
+| All Spaces, minimal chooser fields | 7.06 | 10.83 |
+| All windows, full fields | 28.21 | 38.97 |
+| Visible Space 1 windows, including Space field | 6.62 | 17.43 |
+| Visible Space 15 windows, including Space field | 5.93 | 10.95 |
+
+A separate 40-sample field-level experiment found:
+
+- Spaces `id`: 0.37 ms; `id,frames`: 0.41 ms. Frame serialization is not a bottleneck.
+- Spaces `id,index`: 1.78 ms. Index lookup repeatedly calls
+  `SLSCopyManagedDisplaySpaces` through `space_manager_mission_control_index`.
+- Focused-Space windows `id`: 0.54 ms; `id,title`: 0.56 ms. Titles are already cached
+  in this branch (`window_title_ts`); title serialization is not an AX round-trip.
+- Windows `id,space`: 2.86 ms. `window_space` calls `SLSCopySpacesForWindows`, with
+  further work to translate Space identity to index. This prompted removing that
+  unused field from the normal chooser query.
+
+The next daemon optimization, if needed, should reuse one topology/index map per
+query and avoid repeating WindowServer lookups. A compact snapshot/subscription
+API could reduce both query count and redundant work. Rewriting ratpoison tree
+serialization is not justified by these measurements.
+
+### Reassessment of native keyboard capture
+
+A resident UI owning Cmd-S could remove the approximately 7 ms helper path plus
+Phoenix scheduling overhead. It would not remove the remaining data-validation
+queries. With warm native show p95 below 10 ms, migration is no longer the first
+performance priority on the measured components.
+
+Keep Phoenix for now and use opt-in real-prefix timestamps (`profileLatency`)
+to distinguish its callback/Task scheduling from native acknowledgment. If real
+warm opens still miss the 50 ms target, capture physical key-to-presentation
+latency and consider moving only the ratpoison bindings into the UI. The current
+benchmarks do not include actual key dispatch or physical screen presentation,
+so the end-to-end target has not yet been proven.
+
+Validation: Phoenix navigation/stack/search/move regressions, cache/stale-binding/
+topology tests, 16 native renderer/socket tests, and 9 configuration tests passed.
+Dock reconnect with actual hardware and high-speed key-to-screen capture were
+not performed. Changes are installed locally; nothing has been pushed.

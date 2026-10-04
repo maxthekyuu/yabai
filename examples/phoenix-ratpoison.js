@@ -27,6 +27,133 @@ var yabaiRatpoison = (function () {
     var searching = false;
     var generation = 0;
     var queuedDirection = null;
+    var client = renderer.replace(/yabai-prefix$/, 'yabai-prefix-client');
+    var residentTask = null, residentToken = null, residentRevision = 0;
+    var sending = false, pendingMessage = null, residentEpoch = 0;
+    var cachedPayload = null, preparing = false, refreshTimer = null, dataGeneration = 0;
+    var normalMenu = false;
+    var cachedChoices = {}, queuedChoice = null;
+    function choiceIdentity(entry) {
+        return spaceIdentity(entry.space) + (entry.window !== undefined ? ":w" + entry.window : entry.frame !== undefined ? ":f" + entry.frame : ":container");
+    }
+    var latencyStart = null;
+    function latency(stage) {
+        if (theme.profileLatency && latencyStart !== null && typeof Phoenix !== 'undefined')
+            Phoenix.log('ratpoison-latency ' + JSON.stringify({stage:stage, elapsed_ms:Date.now() - latencyStart, generation:generation}));
+    }
+
+    var spaceFields = 'id,uuid,index,display,type,has-focus,is-visible,frames';
+    var windowFields = 'id,pid,app,title,frame,has-focus,is-minimized,is-hidden';
+
+    function ensureResident() {
+        if (residentTask !== null) return;
+        var epoch = ++residentEpoch;
+        if (typeof Storage !== 'undefined') {
+            var previous = Storage.get('yabaiRatpoisonRenderer');
+            if (typeof previous === 'string' && /^[a-zA-Z0-9.-]{1,48}$/.test(previous))
+                Task.run(client, [previous, JSON.stringify({action:'quit', revision:0})], function () {});
+        }
+        residentToken = String(Date.now()) + '-' + String(Math.random()).slice(2);
+        if (typeof Storage !== 'undefined') Storage.set('yabaiRatpoisonRenderer', residentToken);
+        residentTask = Task.run('/usr/bin/env', [renderer, '--serve', residentToken], function () {
+            if (epoch !== residentEpoch) return;
+            residentTask = null; residentToken = null;
+            if (active && !searching) cancel();
+        });
+    }
+
+    function resident(action, payload) {
+        ensureResident();
+        pendingMessage = { action: action, payload: payload, revision: ++residentRevision };
+        pump();
+    }
+
+    function pump() {
+        if (sending || !pendingMessage) return;
+        var message = pendingMessage; pendingMessage = null;
+        var epoch = residentEpoch;
+        var requestStart = latencyStart;
+        sending = true;
+        Task.run(client, [residentToken, JSON.stringify(message)], function (task) {
+            sending = false;
+            if (task.status === 0 && active && requestStart === latencyStart && message.action !== 'hide' && message.action !== 'prepare') latency('renderer-ack');
+            if (task.status !== 0 && epoch === residentEpoch) {
+                ++residentEpoch;
+                if (residentTask !== null) Task.terminate(residentTask);
+                residentTask = null; residentToken = null;
+                // At most one recovery, with a complete payload. Superseded
+                // show messages must never reopen a cancelled chooser.
+                if (!message.retried && (pendingMessage || active)) {
+                    if (!pendingMessage) pendingMessage = Object.assign({}, message, {payload:message.payload || cachedPayload, retried:true});
+                    else pendingMessage.retried = true;
+                    ensureResident();
+                } else if (active && !pendingMessage) error('prefix renderer connection failed');
+            }
+            if (pendingMessage) { ensureResident(); pump(); }
+        });
+    }
+
+    function fetchSnapshot(callback, attempt, valid) {
+        attempt = attempt || 0;
+        run(['query', '--spaces', spaceFields], function (task) {
+            if (valid && !valid()) return;
+            var spaces;
+            try { spaces = JSON.parse(task.output); } catch (_) {}
+            if (task.status !== 0 || !Array.isArray(spaces)) {
+                if (attempt < 3) { Timer.after(0.05 * (attempt + 1), function () { if (!valid || valid()) fetchSnapshot(callback, attempt + 1, valid); }); return; }
+                callback(null); return;
+            }
+            var focused = spaces.filter(function (space) { return space['has-focus']; })[0];
+            if (!focused) { callback(null); return; }
+            var visible = spaces.filter(function (space) { return space['is-visible'] || space.id === focused.id; });
+            var model = {spaces:spaces, space:focused, lists:{}, displays:[]};
+            var needsDisplays = visible.some(function (space) { return space.type !== 'ratpoison'; });
+            var pending = visible.length + (needsDisplays ? 1 : 0), failed = false;
+            function done() { if (--pending === 0) callback(failed ? null : model); }
+            visible.forEach(function (space) {
+                run(['query', '--windows', windowFields, '--space', String(space.index)], function (task) {
+                    var windows; try { windows = JSON.parse(task.output); } catch (_) {}
+                    if (task.status !== 0 || !Array.isArray(windows)) failed = true;
+                    else model.lists[space.id] = windows;
+                    done();
+                });
+            });
+            if (needsDisplays) run(['query', '--displays'], function (task) {
+                try { model.displays = JSON.parse(task.output); } catch (_) { failed = true; }
+                if (task.status !== 0 || !Array.isArray(model.displays)) failed = true;
+                done();
+            });
+        });
+    }
+
+    function refreshPrepared() {
+        var stamp = ++dataGeneration;
+        if (active || configTask !== null) return;
+        fetchSnapshot(function (model) {
+            if (!model || active || stamp !== dataGeneration) return;
+            preparing = true;
+            visibleChoices('windows', model.space, model.lists[model.space.id], generation, model);
+            preparing = false;
+        }, 0, function () { return !active && stamp === dataGeneration; });
+    }
+
+    function scheduleRefresh(topology) {
+        ++dataGeneration;
+        if (topology) {
+            cachedPayload = null; cachedChoices = {}; queuedChoice = null;
+            if (active) {
+                if (!normalMenu || searching) cancel();
+                else resident('hide');
+            }
+        }
+        if (refreshTimer !== null) Timer.off(refreshTimer);
+        refreshTimer = Timer.after(0.08, function () {
+            refreshTimer = null;
+            if (active && normalMenu && !searching) load('windows');
+            else if (!active) refreshPrepared();
+        });
+    }
+
 
     function clearKeys() {
         keys.forEach(function (key) { Key.off(key); });
@@ -36,15 +163,18 @@ var yabaiRatpoison = (function () {
     function cancel() {
         active = false;
         searching = false;
+        queuedChoice = null;
         queuedDirection = null;
         generation += 1;
         clearKeys();
         if (transitionTimer !== null) Timer.off(transitionTimer);
         transitionTimer = null;
         closeMenu();
+        scheduleRefresh(false);
     }
 
     function closeMenu() {
+        if (residentTask !== null) resident('hide');
         rendererGeneration += 1;
         if (rendererTask !== null) Task.terminate(rendererTask);
         rendererTask = null;
@@ -53,7 +183,13 @@ var yabaiRatpoison = (function () {
         modal = null;
     }
 
-    function show(text, duration, groups, badges, search, onSelect, selections) {
+    function show(text, duration, groups, badges, search, onSelect, selections, cacheable) {
+        if (!search && !duration) {
+            var data = {text:text, groups:groups || [], badges:badges || [], selections:selections || [], theme:theme, screen:Screen.main().visibleFrame()};
+            if (cacheable) cachedPayload = data;
+            resident(preparing ? 'prepare' : 'update', data);
+            return;
+        }
         var payload = JSON.stringify({ text: text, groups: groups || [], badges: badges || [], search: search || undefined, selections: selections || [], theme: theme, screen: Screen.main().visibleFrame() });
         if (rendererTask !== null && rendererSession !== null && !search && !duration) {
             var updateGeneration = rendererGeneration;
@@ -137,6 +273,7 @@ var yabaiRatpoison = (function () {
     }
 
     function bind(key, modifiers, callback) {
+        if (preparing) return;
         keys.push(Key.on(key, modifiers, function (_, repeated) {
             if (active && !repeated) {
                 callback();
@@ -457,7 +594,7 @@ var yabaiRatpoison = (function () {
         page = (page + pages.length) % pages.length;
         var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages.length, width),
                      clip('r ratpoison   f floating   b bsp   Shift-T toggle', width), ''];
-        var groups = [], badges = [], selections = [], hint = 0;
+        var groups = [], badges = [], selections = [], hint = 0, pageChoices = {};
         pages[page].forEach(function (group) {
             var start = lines.length;
             var heading = ' Display ' + group.display + (group.continued ? ' (continued)' : '') + ' ';
@@ -465,6 +602,7 @@ var yabaiRatpoison = (function () {
             var cells = group.entries.map(function (entry) {
                 var key = alphabet[entry.shortcut === undefined ? hint : entry.shortcut % alphabet.length];
                 ++hint;
+                pageChoices[key] = entry;
                 bind(key, [], function () { choose(entry); });
                 if (entry.rect && (!entry.space || entry.space.id === space.id || entry.space['is-visible'])) {
                     badges.push({ key: key, rect: entry.rect, display: group.display, state: entry.hintState || "normal" });
@@ -500,7 +638,15 @@ var yabaiRatpoison = (function () {
         bind('space', [], nextPage);
         bind('space', ['shift'], previousPage);
         if (title === 'visible windows / frames') bind('/', [], function () { searchWindows(choose, space); });
-        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges, null, null, selections);
+        if (title === 'visible windows / frames') cachedChoices = Object.keys(pageChoices).reduce(function (map, key) {
+            map[key] = choiceIdentity(pageChoices[key]); return map;
+        }, {});
+        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges, null, null, selections, title === 'visible windows / frames');
+        if (!preparing && queuedChoice !== null) {
+            var wanted = queuedChoice; queuedChoice = null;
+            var match = entries.filter(function (entry) { return choiceIdentity(entry) === wanted; })[0];
+            if (match) choose(match);
+        }
     }
 
     // A display is a container whose destination is its currently visible Space.
@@ -688,9 +834,15 @@ var yabaiRatpoison = (function () {
         });
     }
 
-    function visibleChoices(mode, space, windows, current) {
-        run(['query', '--spaces'], function (task) {
-            if (!active || generation !== current) return;
+    function visibleChoices(mode, space, windows, current, snapshot) {
+        function read(args, callback) {
+            if (!snapshot) { run(args, callback); return; }
+            var value = args[1] === '--spaces' ? snapshot.spaces : args[1] === '--displays' ? snapshot.displays :
+                snapshot.lists[snapshot.spaces.filter(function (item) { return item.index === Number(args[3]); })[0].id];
+            callback({status:0, output:JSON.stringify(value)});
+        }
+        read(['query', '--spaces'], function (task) {
+            if ((!active && !preparing) || generation !== current) return;
             var spaces;
             try { spaces = JSON.parse(task.output); } catch (_) {}
             if (task.status !== 0 || !Array.isArray(spaces)) { error('visible Space query failed'); return; }
@@ -774,8 +926,8 @@ var yabaiRatpoison = (function () {
                     }, 0);
                 }
                 if (!entries.some(function (entry) { return entry.container; })) { present(); return; }
-                run(['query', '--displays'], function (task) {
-                    if (!active || generation !== current) return;
+                read(['query', '--displays'], function (task) {
+                    if ((!active && !preparing) || generation !== current) return;
                     var displays;
                     try { displays = JSON.parse(task.output); } catch (_) {}
                     if (task.status !== 0 || !Array.isArray(displays)) { error('container geometry query failed'); return; }
@@ -792,8 +944,8 @@ var yabaiRatpoison = (function () {
             }
             if (!pending) { render(); return; }
             visible.slice(1).forEach(function (item) {
-                run(['query', '--windows', '--space', String(item.index)], function (task) {
-                    if (!active || generation !== current) return;
+                read(['query', '--windows', '--space', String(item.index)], function (task) {
+                    if ((!active && !preparing) || generation !== current) return;
                     var result;
                     try { result = JSON.parse(task.output); } catch (_) {}
                     if (task.status !== 0 || !Array.isArray(result)) { error('visible window query failed'); return; }
@@ -805,12 +957,29 @@ var yabaiRatpoison = (function () {
     }
 
     function load(mode) {
+        normalMenu = mode === 'windows';
+        if (!normalMenu) queuedChoice = null;
+        ++dataGeneration;
         var current = ++generation;
         queuedDirection = null;
         clearKeys();
         controls();
         // Keep the last menu and its native panel visible while refreshing.
         // Keyboard bindings remain guarded until the new query completes.
+        if (mode === 'windows' || mode === 'frames') {
+            fetchSnapshot(function (model) {
+                if (!active || generation !== current) return;
+                if (!model) { error('invalid space query response after retries; check yabai logs'); return; }
+                latency('fresh-data');
+                var space = model.space, windows = model.lists[space.id];
+                if (queuedDirection) {
+                    var direction = queuedDirection; queuedDirection = null;
+                    if (navigate(space, windows, direction)) return;
+                }
+                visibleChoices(mode, space, windows, current, model);
+            }, 0, function () { return active && generation === current; });
+            return;
+        }
         focusedSpace(0);
         function focusedSpace(attempt) {
         run(['query', '--spaces', '--space'], function (spaceTask) {
@@ -859,7 +1028,17 @@ var yabaiRatpoison = (function () {
         if (active) { cancel(); return; }
         if (typeof hintsActive !== 'undefined' && hintsActive && typeof cancelHints === 'function') cancelHints();
         active = true;
+        latencyStart = Date.now();
+        latency('prefix-key');
+        var cached = cachedPayload && JSON.stringify(cachedPayload.screen) === JSON.stringify(Screen.main().visibleFrame());
+        var oldChoices = cachedChoices;
+        if (cached) resident('show', cachedPayload);
+        else resident('update', {text:'YABAI  Loading windows…\nEsc close', theme:theme, screen:Screen.main().visibleFrame()});
+        queuedChoice = null;
         load('windows');
+        if (cached) Object.keys(oldChoices).forEach(function (key) {
+            bind(key, [], function () { queuedChoice = oldChoices[key]; });
+        });
     }
 
     Task.run('/usr/bin/python3', [settingsBackend, 'theme'], function (task) {
@@ -873,6 +1052,22 @@ var yabaiRatpoison = (function () {
         if (!repeated) command(['window', '--toggle', 'windowed-fullscreen']);
     });
     Key.on('s', ['cmd'], function (_, repeated) { if (!repeated) start(); });
+    ['windowDidOpen', 'windowDidClose', 'windowDidFocus', 'windowDidMove', 'windowDidResize',
+     'windowDidMinimize', 'windowDidUnminimize', 'appDidHide', 'appDidShow'].forEach(function (event) {
+        Event.on(event, function (item) {
+            // Ignore our own non-activating panels: their updates must not
+            // cause a self-sustaining geometry/query feedback loop.
+            var app = item && typeof item.app === 'function' ? item.app() : item;
+            if (app && typeof app.name === 'function' && app.name() === 'yabai-prefix') return;
+            scheduleRefresh(false);
+        });
+    });
+    ['screensDidChange', 'spaceDidChange', 'deviceDidWake'].forEach(function (event) {
+        Event.on(event, function () { scheduleRefresh(true); });
+    });
+    Event.on('willTerminate', function () { if (residentTask !== null) Task.terminate(residentTask); });
+    ensureResident();
+    scheduleRefresh(false);
     Event.on('mouseDidLeftClick', function () { if (!searching) cancel(); });
     return { cancel: cancel, start: start, configure: function (options) {
         baseTheme = Object.assign({}, baseTheme, options);

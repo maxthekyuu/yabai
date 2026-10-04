@@ -1,5 +1,5 @@
 /* Native, non-activating HUD for the Phoenix prefix module. No keyboard hooks:
- * Phoenix owns the session and terminates this process when it closes. */
+ * Phoenix owns a resident socket server; search/configuration use separate panels. */
 #import <Cocoa/Cocoa.h>
 
 static NSColor *terminal_color(unsigned rgb)
@@ -11,6 +11,7 @@ static NSColor *terminal_color(unsigned rgb)
 
 static NSDictionary *menu_theme;
 static NSFont *menu_font;
+static BOOL menu_hidden;
 
 static NSColor *theme_color(NSString *name, unsigned fallback)
 {
@@ -41,6 +42,7 @@ static BOOL theme_hex_valid(id value)
 
 static BOOL configure_theme(id theme)
 {
+    if (menu_font && [menu_theme isEqual:theme ?: @{}]) return YES;
     if (theme && ![theme isKindOfClass:NSDictionary.class]) return NO;
     if (theme[@"font"] && ![theme[@"font"] isKindOfClass:NSString.class]) return NO;
     if (theme[@"fontSize"] && (![theme[@"fontSize"] isKindOfClass:NSNumber.class] ||
@@ -55,6 +57,15 @@ static BOOL configure_theme(id theme)
     menu_theme = theme ?: @{};
     menu_font = [NSFont fontWithName:theme[@"font"] ?: @"GoMono Nerd Font Mono" size:theme[@"fontSize"] ? [theme[@"fontSize"] doubleValue] : 12];
     return menu_font != nil;
+}
+
+static NSRegularExpression *menu_expression(NSString *pattern)
+{
+    static NSMutableDictionary *expressions;
+    if (!expressions) expressions = [NSMutableDictionary dictionary];
+    NSRegularExpression *expression = expressions[pattern];
+    if (!expression) expressions[pattern] = expression = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+    return expression;
 }
 
 @interface PrefixMenuView : NSView
@@ -99,7 +110,7 @@ static BOOL configure_theme(id theme)
         NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:line attributes:attributes];
         if (i > 1) {
             for (NSString *pattern in @[@"\\* F[0-9]+", @"\\[empty\\]"]) {
-                NSRegularExpression *expression = [NSRegularExpression regularExpressionWithPattern:pattern options:0 error:NULL];
+                NSRegularExpression *expression = menu_expression(pattern);
                 for (NSTextCheckingResult *match in [expression matchesInString:line options:0 range:NSMakeRange(0, line.length)]) {
                     [text addAttribute:NSForegroundColorAttributeName
                                  value:theme_color([pattern hasPrefix:@"\\*"] ? @"activeFrame" : @"emptyFrame", [pattern hasPrefix:@"\\*"] ? 0x55ff55 : 0xffff55) range:match.range];
@@ -137,7 +148,7 @@ static BOOL configure_theme(id theme)
         // Paint the selected frame number last so the cell selection cannot
         // overwrite its color. Leave neighbouring and covered frame labels alone.
         if (i > 1) {
-            NSRegularExpression *frame = [NSRegularExpression regularExpressionWithPattern:@"\\* (F[0-9]+)" options:0 error:NULL];
+            NSRegularExpression *frame = menu_expression(@"\\* (F[0-9]+)");
             for (NSTextCheckingResult *match in [frame matchesInString:line options:0 range:NSMakeRange(0, line.length)])
                 [text addAttribute:NSForegroundColorAttributeName value:theme_color(@"selectedFrameNumber", 0xff5555) range:[match rangeAtIndex:1]];
         }
@@ -178,6 +189,8 @@ static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSFont *fo
 @interface PrefixHintView : NSView
 @property(nonatomic, strong) NSString *keys;
 @property(nonatomic, strong) NSArray *states;
+@property(nonatomic, strong) NSAttributedString *styledText;
+@property(nonatomic, strong) NSDictionary *theme;
 @property(nonatomic, strong) NSFont *font;
 @property(nonatomic, strong) NSColor *color;
 @end
@@ -191,7 +204,7 @@ static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSFont *fo
     NSBezierPath *outline = [NSBezierPath bezierPathWithRect:NSInsetRect(self.bounds, 1, 1)];
     outline.lineWidth = 2;
     [outline stroke];
-    NSAttributedString *text = hint_text(self.keys, self.states, self.font, self.color);
+    NSAttributedString *text = self.styledText;
     NSSize size = text.size;
     [text drawAtPoint:NSMakePoint((self.bounds.size.width - size.width) / 2,
                                  (self.bounds.size.height - size.height) / 2)];
@@ -248,12 +261,19 @@ static NSArray *hint_layout(id badges, NSFont *font)
     return groups;
 }
 
-static PrefixHintView *hint_view(NSDictionary *hint, NSFont *font)
+static PrefixHintView *hint_view(NSDictionary *hint, NSFont *font, PrefixHintView *existing)
 {
-    PrefixHintView *view = [[PrefixHintView alloc] initWithFrame:NSMakeRect(0, 0, [hint[@"width"] doubleValue], [hint[@"height"] doubleValue])];
+    NSColor *color = display_color([hint[@"display"] unsignedIntegerValue]);
+    if (existing && [existing.keys isEqual:hint[@"keys"]] && [existing.states isEqual:hint[@"states"]] &&
+        [existing.font isEqual:font] && [existing.color isEqual:color] && [existing.theme isEqual:menu_theme]) return existing;
+    PrefixHintView *view = existing ?: [[PrefixHintView alloc] initWithFrame:NSZeroRect];
+    view.frame = NSMakeRect(0, 0, [hint[@"width"] doubleValue], [hint[@"height"] doubleValue]);
     view.font = font; view.keys = hint[@"keys"]; view.states = hint[@"states"];
     NSUInteger display = [hint[@"display"] unsignedIntegerValue];
     view.color = display_color(display);
+    view.theme = menu_theme;
+    view.styledText = hint_text(view.keys, view.states, font, view.color);
+    [view setNeedsDisplay:YES];
     return view;
 }
 
@@ -379,7 +399,7 @@ static NSDictionary *search_layout(NSArray *entries, NSString *query, NSInteger 
         if (i >= hints.count) { [badge orderOut:nil]; continue; }
         NSDictionary *hint = hints[i];
         [badge setFrame:NSMakeRect([hint[@"x"] doubleValue], [hint[@"y"] doubleValue], [hint[@"width"] doubleValue], [hint[@"height"] doubleValue]) display:NO];
-        badge.contentView = hint_view(hint, self.font);
+        badge.contentView = hint_view(hint, self.font, [badge.contentView isKindOfClass:PrefixHintView.class] ? (PrefixHintView *)badge.contentView : nil);
         [badge orderFrontRegardless];
     }
 }
@@ -539,7 +559,9 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
         }
         NSSize size = NSMakeSize(MIN(ceil(width) + 28, screen.size.width - 32),
                                  MIN(lines.count * lineHeight + 28, screen.size.height - 32));
-        PrefixMenuView *view = [[PrefixMenuView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+        PrefixMenuView *view = existingPanel ? (PrefixMenuView *)existingPanel.contentView : [[PrefixMenuView alloc] initWithFrame:NSMakeRect(0, 0, size.width, size.height)];
+        view.frame = NSMakeRect(0, 0, size.width, size.height);
+        [view setNeedsDisplay:YES];
         view.font = font;
         view.selections = selections;
         view.lines = lines;
@@ -565,7 +587,7 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
             NSData *json = [NSJSONSerialization dataWithJSONObject:metrics options:0 error:NULL];
             puts([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
             if (hints.count) {
-                PrefixHintView *hint = hint_view(hints[0], font);
+                PrefixHintView *hint = hint_view(hints[0], font, nil);
                 NSBitmapImageRep *bitmap = [hint bitmapImageRepForCachingDisplayInRect:hint.bounds];
                 [hint cacheDisplayInRect:hint.bounds toBitmapImageRep:bitmap];
                 NSString *path = [[NSString stringWithUTF8String:snapshotPath.UTF8String] stringByAppendingString:@".hint.png"];
@@ -589,7 +611,7 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
         panel.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces |
                                    NSWindowCollectionBehaviorFullScreenAuxiliary |
                                    NSWindowCollectionBehaviorIgnoresCycle;
-        [panel orderFrontRegardless];
+        if (!menu_hidden) [panel orderFrontRegardless];
         NSMutableArray *hintPanels = existingHints;
         NSUInteger hintIndex = 0;
         for (NSDictionary *hint in hints) {
@@ -599,13 +621,13 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
                 styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
                 backing:NSBackingStoreBuffered defer:NO];
             [badge setFrame:bounds display:NO];
-            badge.contentView = hint_view(hint, font);
+            badge.contentView = hint_view(hint, font, [badge.contentView isKindOfClass:PrefixHintView.class] ? (PrefixHintView *)badge.contentView : nil);
             badge.backgroundColor = theme_color(@"hintBackground", 0);
             badge.opaque = YES; badge.hasShadow = NO;
             badge.ignoresMouseEvents = YES; badge.hidesOnDeactivate = NO;
             badge.level = NSStatusWindowLevel + 1;
             badge.collectionBehavior = panel.collectionBehavior;
-            [badge orderFrontRegardless];
+            if (!menu_hidden) [badge orderFrontRegardless];
             if (hintIndex == hintPanels.count) [hintPanels addObject:badge];
             hintIndex++;
         }
@@ -617,9 +639,11 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
 }
 
 #include "prefix_config.m"
+#include "prefix_server.m"
 
 int main(int argc, const char **argv)
 {
+    if (argc == 3 && strcmp(argv[1], "--serve") == 0) { @autoreleasepool { return prefix_serve(argv[2]); } }
     @autoreleasepool {
         if (argc == 3 && strcmp(argv[1], "--configure") == 0) {
             [NSApplication sharedApplication];

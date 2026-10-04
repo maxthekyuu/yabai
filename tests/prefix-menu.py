@@ -75,6 +75,47 @@ class PrefixMenuTests(unittest.TestCase):
             process.terminate()
             process.wait(timeout=3)
 
+    def test_resident_socket_lifecycle(self):
+        token = str(uuid.uuid4())
+        process = subprocess.Popen([str(BINARY), '--serve', token])
+        client = ROOT / 'bin/yabai-prefix-client'
+        payload = {'text':'YABAI resident', 'screen':{'x':-20000,'y':-20000,'width':1000,'height':800},
+                   'badges':[{'key':'0','display':1,'state':'focused','rect':{'x':-20000,'y':-20000,'w':400,'h':300}}]}
+        def request(action, revision, data=None):
+            message = dict(action=action,revision=revision)
+            if data is not None: message['payload'] = data
+            result = subprocess.run([str(client),token,json.dumps(message)],capture_output=True,text=True,timeout=3)
+            return result, json.loads(result.stdout)
+        try:
+            result, state = request('prepare',1,payload)
+            self.assertEqual(result.returncode,0)
+            self.assertFalse(state['visible'])
+            import os, stat
+            path = Path('/tmp') / ('yabai-prefix-%s-%s.sock' % (os.getuid(),token))
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode),0o600)
+            _, state = request('show',2)
+            self.assertTrue(state['visible']); self.assertTrue(state['reused'])
+            _, state = request('hide',4)
+            self.assertFalse(state['visible'])
+            result, state = request('show',3)
+            self.assertNotEqual(result.returncode,0); self.assertFalse(state['visible'])
+            result, state = request('update',5,{'text':123})
+            self.assertNotEqual(result.returncode,0)
+            self.assertIsNone(process.poll())
+            _, state = request('show',6)
+            self.assertTrue(state['visible']); self.assertTrue(state['reused'])
+            for revision in range(7,27):
+                _, state = request('hide' if revision % 2 else 'show',revision)
+                self.assertEqual(state['visible'],revision % 2 == 0)
+            _, state = request('stats',27)
+            self.assertTrue(state['visible'])
+            result, _ = request('quit',0)
+            self.assertEqual(result.returncode,0)
+            process.wait(timeout=3)
+        finally:
+            process.terminate(); process.wait(timeout=3)
+        self.assertFalse(path.exists())
+
     def test_terminal_menu(self):
         text = '\n'.join([
             'YABAI  ratpoison  |  windows / frames  |  1/3',

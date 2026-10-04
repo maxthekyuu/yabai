@@ -480,3 +480,39 @@ retain the display color and regular font, even when grouped into the same badge
 Missing font traits are synthesized. Configure `prefix.colors.hintFront` and
 `prefix.colors.hintFocused` through Shift-C; these override the general hint text
 color for emphasized keys.
+
+## Low-latency prefix lifecycle
+
+The prefix renderer stays resident while Phoenix runs. Escape and actions hide
+its panels; subsequent opens reuse the same process. Build and install
+`bin/yabai-prefix-client` alongside `bin/yabai-prefix`. The Phoenix module uses
+the sibling client path derived from its renderer path. Search and configuration
+remain separate interactive processes.
+
+The native client communicates over a private, owner-only Unix socket. Requests
+carry revisions; older requests cannot undo a newer hide. Phoenix coalesces
+pending updates and retries a failed connection once. The renderer exits when
+its Phoenix parent exits. Phoenix Storage retains the previous session token so
+a configuration reload can explicitly retire its renderer. Closing/opening the dialog does not restart yabai or
+require Accessibility approval.
+
+Window, application, Space and screen events schedule a coalesced background
+refresh (80 ms); there is no periodic idle polling. The prepared dialog appears
+immediately on a normal open. Early selection keys are buffered by window/frame identity and executed only
+after a fresh snapshot validates the target. Closed targets are discarded. Escape and navigation buffering work during this
+refresh. A screen/Space change discards cached geometry; a loading panel is used
+until fresh geometry arrives. Rapid prefix input immediately after Phoenix
+starts can still incur initialization time.
+
+The cache is a display optimization, not permission to act on stale window IDs.
+Commands issued outside the prefix may briefly leave old visual content until
+the opening refresh completes. Existing key bindings and the close-after-action
+behavior are unchanged. The resident renderer typically occupies about 50 MB;
+actual usage depends on font and panel count.
+
+For optional latency logging, configure `yabaiRatpoison.configure({profileLatency:true})`
+in Phoenix. It logs elapsed milliseconds at the prefix callback, fresh-data
+completion and renderer acknowledgment using `Phoenix.log`, without window titles.
+Disable with `profileLatency:false`. A renderer acknowledgment is not a measured
+physical display presentation timestamp. Event names follow the
+[Phoenix event API](https://kasper.github.io/phoenix/api/events/).
