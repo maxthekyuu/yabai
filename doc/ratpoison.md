@@ -128,7 +128,9 @@ frames and may draw additional borders if left running.
 `ratpoison_layout_persistence` defaults to `on`. Layouts are remembered by macOS
 Space UUID so reconnecting a display can restore the layout even if Space or
 display numbers change. Ratpoison retains its split tree, ratios, frame IDs,
-empty frames, and selected frame. Other layout modes retain their mode; BSP
+empty frames, and selected frame. During the same yabai process, surviving
+windows also return to their remembered frames as macOS returns them to each
+Space, including inactive desktops. Other layout modes retain their mode; BSP
 rebuilds its automatic tree from the current windows.
 
 `ratpoison_session_persistence` defaults to `off`. Enable it **after** your layout
@@ -194,6 +196,7 @@ Press **Super-S (Command-S)**, release it, then choose:
 | `Shift-C` | Open searchable configuration; Save applies and persists a setting |
 | Other displayed digits/letters | Select that window or empty frame |
 | Arrows or `h/j/k/l` | Focus west/south/north/east, including empty frames |
+| `Shift-Arrows` | Move the focused window to the neighboring frame and keep the menu open |
 | `Shift-S` | Split horizontally (top/bottom) |
 | `Shift-V` | Split vertically (left/right) |
 | `Shift-F`, then a label | Select a frame or container on any visible Space |
@@ -260,6 +263,20 @@ yabai commands are saved as safely quoted shell commands. Session persistence
 is enabled last, after saved layout defaults. Existing Phoenix Ctrl-F/Super-S
 bindings and key definitions remain outside this settings editor.
 
+### Directional window movement
+
+**Super-Shift-Arrows (Command-Shift-Arrows)** move the focused window without
+opening the prefix menu. **Super-S, Shift-Arrows** perform the same movement
+while keeping the menu open for repeated moves. In ratpoison, the window moves
+to the neighboring frame in that direction, including occupied and empty
+frames, and remains focused there. The source frame stays in place. Movement
+starts from the focused window's frame, even when an empty frame is selected;
+at the edge, it does nothing. It stays within the current Space.
+
+BSP uses directional warp. In floating mode, windows move by 40 logical points.
+The module owns the four global Command-Shift-Arrow bindings; remove older
+Phoenix bindings for those combinations before loading it.
+
 ### Temporary fullscreen
 
 **Ctrl-F** directly toggles temporary fullscreen for the currently focused
@@ -295,7 +312,8 @@ var yabaiRatpoisonConfig = {
     colors: {
         background: '#000000', text: '#c0c0c0',
         title: '#55ffff', accent: '#ffff55', help: '#aaaaaa', status: '#aaaaaa',
-        activeFrame: '#55ff55', emptyFrame: '#ffff55', error: '#ff5555',
+        activeFrame: '#55ff55', emptyFrame: '#5555ff', error: '#ff5555',
+        selectedDisplayBackground: '#182828', minimizedWindow: '#707070',
         selectionText: '#ffffff', selectionBackground: '#004444',
         hintBackground: '#000000',
         // Optional hintText/hintBorder override the corresponding display color.
@@ -471,17 +489,29 @@ and close the last window in a frame, switch Spaces/displays, and switch back to
 BSP/float. Applications can enforce minimum window sizes, as with existing yabai
 layouts.
 
-The current selected frame's `F<number>` label is red, including within the
-selected entry's background highlight. Other frame labels retain their usual
-colors. Change `prefix.colors.selectedFrameNumber` through Shift-C to customize
+The selected occupied frame's `F<number>` label is red, including within the
+selected entry's background highlight. Empty frame labels use blue; other frame
+labels follow their window's appearance. Change `prefix.colors.selectedFrameNumber` through Shift-C to customize
 the red. This indicator does not depend on bold or italic font support.
 
-Overlay shortcut labels use yellow bold text for each frame's front-most window
-and red bold italic text for the actually focused window. Covered stack keys
-retain the display color and regular font, even when grouped into the same badge.
-Missing font traits are synthesized. Configure `prefix.colors.hintFront` and
-`prefix.colors.hintFocused` through Shift-C; these override the general hint text
-color for emphasized keys.
+The overview marks the current physical display with `*` and a dark teal
+background (`prefix.colors.selectedDisplayBackground`, default `#182828`).
+Display outlines keep their palette colors. Visible front windows are yellow
+(`prefix.colors.hintFront`); focused windows retain the selected-cell background
+and white text, with red bold italic keys in the frame's index label. Empty
+frames use blue in both the overview and index (`prefix.colors.emptyFrame`,
+default `#5555ff`, matching the default selected-empty frame border).
+
+Covered stack windows use distinct muted colors keyed by their stable W numbers.
+Each window has the same color in its menu entry and the index drawn on its
+frame; focusing, paging, and reordering the stack do not change that assignment.
+The muted palette is generated automatically. Minimized windows appear in dark
+gray (`prefix.colors.minimizedWindow`, default `#707070`) with `[minimized]`,
+without an index at their former position. Selecting one restores and focuses it.
+
+Configure the named colors through Shift-C. Missing font traits are synthesized.
+`prefix.colors.hintFront` and `prefix.colors.hintFocused` override the general
+hint text color for emphasized keys.
 
 ## Low-latency prefix lifecycle
 

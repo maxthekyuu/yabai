@@ -772,6 +772,7 @@ struct window_node *view_add_window_node_with_insertion_point(struct view *view,
         if (!node) node = view_ratpoison_selected_frame(view);
         if (node->window_count == NODE_MAX_WINDOW_COUNT) return NULL;
         view_stack_window_node(node, window);
+        ratpoison_layout_capture(view);
         return node;
     } else if (!window_node_is_occupied(view->root) &&
                window_node_is_leaf(view->root)) {

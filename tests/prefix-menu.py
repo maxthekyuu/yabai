@@ -17,11 +17,11 @@ OUTPUT = ROOT / 'tests/bin'
 
 
 class PrefixMenuTests(unittest.TestCase):
-    def render(self, name, text, screen, groups=None, badges=None, theme=None, selections=None):
+    def render(self, name, text, screen, groups=None, badges=None, theme=None, selections=None, highlights=None):
         OUTPUT.mkdir(exist_ok=True)
         path = OUTPUT / name
         result = subprocess.run(
-            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen, 'groups': groups or [], 'badges': badges or [], 'theme': theme or {}, 'selections': selections or []})],
+            [str(BINARY), '--snapshot', str(path), json.dumps({'text': text, 'screen': screen, 'groups': groups or [], 'badges': badges or [], 'theme': theme or {}, 'selections': selections or [], 'highlights': highlights or []})],
             capture_output=True, text=True, check=True,
         )
         metrics = json.loads(result.stdout)
@@ -260,6 +260,53 @@ class PrefixMenuTests(unittest.TestCase):
                               {'x': 0, 'y': 0, 'width': 1400, 'height': 1000}, selections=selections)
         self.assertEqual(metrics['selections'], selections)
 
+    def test_display_and_visible_window_highlights(self):
+        text = 'YABAI  ratpoison\nr ratpoison f floating b bsp\n\n┌ Display 1 * ──────────────────────────────────────────┐\n│ > 0 * F0 Focused       1 F1 Visible                    │\n│   2 F2 [empty]                                        │\n└──────────────────────────────────────────────────────┘'
+        lines = text.split('\n')
+        highlights = [dict(line=4, start=2, length=20, state='focused'),
+                      dict(line=4, start=24, length=20, state='front'),
+                      dict(line=5, start=2, length=14, state='empty')]
+        groups = [dict(start=3, end=6, display=1, selected=True)]
+        badges = [dict(key='0',display=1,state='focused',rect=dict(x=0,y=0,w=300,h=200)),
+                  dict(key='1',display=1,state='front',rect=dict(x=300,y=0,w=300,h=200)),
+                  dict(key='2',display=1,state='empty',rect=dict(x=600,y=0,w=300,h=200))]
+        metrics = self.render('prefix-visual-step1.png', text,
+                              dict(x=0,y=0,width=1400,height=1000), groups=groups,
+                              badges=badges, highlights=highlights, selections=[dict(line=4,start=2,length=20)])
+        self.assertEqual(metrics['groups'],groups)
+        self.assertEqual(metrics['highlights'],highlights)
+        self.assertEqual([b['states'] for b in metrics['badges']],[['focused'],['front'],['empty']])
+
+    def test_covered_and_minimized_colors(self):
+        text = '\n'.join(['YABAI  ratpoison','r ratpoison f floating b bsp','',
+                         '┌ Display 1 * ──────────────────────────────┐',
+                         '│ > 0 * F0 Focused       1 F1 Visible         │',
+                         '│   2 F0 Covered A      3 F0 Covered B       │',
+                         '│   4 F2 [empty]        5 Editor [minimized]  │',
+                         '└───────────────────────────────────────────┘'])
+        groups = [dict(start=3,end=7,display=1,selected=True)]
+        highlights = [dict(line=4,start=2,length=20,state='focused'),dict(line=4,start=24,length=20,state='front'),
+                      dict(line=5,start=2,length=18,state='covered',color='#966454'),
+                      dict(line=5,start=24,length=18,state='covered',color='#54967a'),
+                      dict(line=6,start=2,length=14,state='empty'),dict(line=6,start=24,length=20,state='minimized')]
+        rect=dict(x=0,y=0,w=400,h=300)
+        badges=[dict(key='0',display=1,rect=rect,state='focused'),
+                dict(key='2',display=1,rect=rect,state='covered',color='#966454'),
+                dict(key='3',display=1,rect=rect,state='covered',color='#54967a')]
+        metrics=self.render('prefix-visual-final.png',text,dict(x=0,y=0,width=1400,height=1000),
+                            groups=groups,highlights=highlights,badges=badges,
+                            selections=[dict(line=4,start=2,length=20)])
+        self.assertEqual(metrics['highlights'],highlights)
+        self.assertEqual(metrics['badges'][0]['colors'],[None,'#966454','#54967a'])
+        self.assertEqual(metrics['badges'][0]['states'],['focused','covered','covered'])
+        # Native search must preserve a covered window's color in both places.
+        entries=[dict(index=0,display=1,label='Covered A',text='Covered A',rect=rect,state='covered',color='#966454'),
+                 dict(index=1,display=1,label='Editor [minimized]',text='Editor',state='minimized')]
+        result=self.search(entries)
+        self.assertEqual(result['highlights'][0]['color'],'#966454')
+        self.assertEqual(result['badges'][0]['color'],'#966454')
+        self.assertEqual(result['highlights'][1]['state'],'minimized')
+
     def test_normal_menu_null_search_and_phoenix_payload(self):
         OUTPUT.mkdir(exist_ok=True)
         subprocess.run(['node', str(ROOT / 'tests/phoenix-ratpoison.js')], cwd=ROOT,
@@ -274,7 +321,11 @@ class PrefixMenuTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout)['search'], {})
 
     def test_invalid_payload(self):
-        for value in [json.dumps({'text':'test','selections':[{'line':0,'start':0,'length':99}]}),
+        for value in [json.dumps({'text':'test','highlights':[{'line':0,'start':0,'length':1,'state':'covered','color':'red'}]}),
+                      json.dumps({'text':'test','badges':[{'key':'0','display':1,'state':'covered','color':'red','rect':{'x':0,'y':0,'w':100,'h':100}}]}),
+                      json.dumps({'text':'test','highlights':[{'line':0,'start':0,'length':99,'state':'front'}]}),
+                      json.dumps({'text':'test','highlights':[{'line':0,'start':0,'length':1,'state':'invalid'}]}),
+                      json.dumps({'text':'test','selections':[{'line':0,'start':0,'length':99}]}),
                       json.dumps({'text':'test','selections':[{'line':0,'start':-1,'length':1}]}),
                       json.dumps({'text':'test','theme':{'fontSize':0}}),
                       json.dumps({'text':'test','theme':{'colors':{'text':'red'}}}),

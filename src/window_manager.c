@@ -2735,15 +2735,7 @@ void window_manager_handle_display_add_and_remove(struct space_manager *sm, stru
 
     for (int i = 0; i < space_count; ++i) {
         if (space_is_user(space_list[i])) {
-            int window_count;
-            uint32_t *window_list = space_window_list(space_list[i], &window_count, false);
-            if (window_list) {
-                struct view *view = space_manager_find_view(sm, space_list[i]);
-                if (view->layout != VIEW_FLOAT) {
-                    window_manager_check_for_windows_on_space(wm, view, window_list, window_count);
-                }
-            }
-            break;
+            window_manager_validate_and_check_for_windows_on_space(sm, wm, space_list[i]);
         }
     }
 

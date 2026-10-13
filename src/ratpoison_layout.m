@@ -121,7 +121,7 @@ static struct window_node *ratpoison_load_node(NSDictionary *dump, struct window
     return node;
 }
 
-static bool ratpoison_apply_dump(struct view *view, NSDictionary *dump)
+static bool ratpoison_apply_dump_with_members(struct view *view, NSDictionary *dump, NSDictionary *saved_members)
 {
     if (!ratpoison_valid_dump(dump)) return false;
     int count = 0;
@@ -130,7 +130,12 @@ static bool ratpoison_apply_dump(struct view *view, NSDictionary *dump)
     NSMutableArray *members = [NSMutableArray array];
     for (int i = 0; i < count; ++i) {
         struct window_node *node = view_find_window_node(view, windows[i]);
-        [members addObject:@{@"id": @(windows[i]), @"frame": @(node ? node->frame_id : 0)}];
+        unsigned frame = node ? node->frame_id : 0;
+        NSDictionary *saved = saved_members[@(windows[i])];
+        struct window *window = window_manager_find_window(&g_window_manager, windows[i]);
+        if (window && saved && [saved[@"identity"] unsignedLongLongValue] == (uintptr_t)window)
+            frame = [saved[@"frame"] unsignedIntValue];
+        [members addObject:@{@"id": @(windows[i]), @"frame": @(frame)}];
     }
     if ([dump[@"layout"] intValue] == VIEW_RATPOISON) {
         NSMutableSet *ids = [NSMutableSet set];
@@ -177,15 +182,25 @@ static bool ratpoison_apply_dump(struct view *view, NSDictionary *dump)
     return true;
 }
 
+static bool ratpoison_apply_dump(struct view *view, NSDictionary *dump)
+{
+    return ratpoison_apply_dump_with_members(view, dump, nil);
+}
+
 void ratpoison_layout_restore_cached(struct view *view)
 {
     if (ratpoison_restoring_layout || (!g_space_manager.ratpoison_layout_persistence && !g_space_manager.ratpoison_session_persistence) || !view->uuid) return;
     NSDictionary *dump = ratpoison_saved_layouts[(NSString *)view->uuid];
-    if (dump && ratpoison_apply_dump(view, dump)) {
-        NSDictionary *members = ratpoison_saved_members[(NSString *)view->uuid];
+    NSDictionary *members = ratpoison_saved_members[(NSString *)view->uuid];
+    if (dump && ratpoison_apply_dump_with_members(view, dump, members)) {
         if (members) {
             if (!ratpoison_pending_members) ratpoison_pending_members = [[NSMutableDictionary alloc] init];
-            ratpoison_pending_members[(NSString *)view->uuid] = [[members mutableCopy] autorelease];
+            NSMutableDictionary *pending = [[members mutableCopy] autorelease];
+            /* Existing windows were restored above; only late arrivals need insertion hints. */
+            for (struct window_node *node = window_node_find_first_leaf(view->root); node; node = window_node_find_next_leaf(node))
+                for (int i = 0; i < node->window_count; ++i)
+                    [pending removeObjectForKey:@(node->window_list[i])];
+            ratpoison_pending_members[(NSString *)view->uuid] = pending;
         }
     }
 }

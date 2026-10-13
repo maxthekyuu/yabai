@@ -33,6 +33,31 @@ static void update_window_notifications(void)
     SLSRequestNotificationsForWindows(g_connection, window_list, window_count);
 }
 
+static EVENT_HANDLER(WINDOW_CREATED);
+
+static struct window *recover_application_focused_window(struct application *application, uint32_t expected_id)
+{
+    if (!application) return NULL;
+    CFTypeRef ref = NULL;
+    AXUIElementCopyAttributeValue(application->ref, kAXFocusedWindowAttribute, &ref);
+    if (!ref) return NULL;
+
+    uint32_t window_id = ax_window_id(ref);
+    if (!window_id || (expected_id && window_id != expected_id)) {
+        CFRelease(ref);
+        return NULL;
+    }
+
+    // Recover missed or premature AXCreated events through normal admission.
+    // WINDOW_CREATED owns the reference, including when admission fails.
+    if (!window_manager_find_window(&g_window_manager, window_id)) {
+        EVENT_HANDLER_WINDOW_CREATED((void *) ref, 0);
+    } else {
+        CFRelease(ref);
+    }
+    return window_manager_find_window(&g_window_manager, window_id);
+}
+
 static void window_did_receive_focus(struct window_manager *wm, struct mouse_state *ms, struct window *window)
 {
     struct window *focused_window = window_manager_find_window(wm, wm->focused_window_id);
@@ -409,6 +434,7 @@ static EVENT_HANDLER(APPLICATION_FRONT_SWITCHED)
     }
 
     struct window *window = window_manager_find_window(&g_window_manager, application_focused_window_id);
+    if (!window) window = recover_application_focused_window(application, application_focused_window_id);
     if (!window) {
         struct window *focused_window = window_manager_find_window(&g_window_manager, g_window_manager.focused_window_id);
         if (focused_window) {
@@ -641,6 +667,10 @@ static EVENT_HANDLER(WINDOW_FOCUSED)
     uint32_t window_id = (uint32_t)(intptr_t) context;
 
     struct window *window = window_manager_find_window(&g_window_manager, window_id);
+    if (!window) {
+        struct application *application = window_manager_focused_application(&g_window_manager);
+        window = recover_application_focused_window(application, window_id);
+    }
     if (!window) {
         window_manager_add_lost_focused_event(&g_window_manager, window_id);
         return;
@@ -1162,6 +1192,18 @@ out:
 static EVENT_HANDLER(MOUSE_UP)
 {
     if (mission_control_is_active()) goto out;
+
+    // Check actual AX focus after the application receives the click.
+    if (g_mouse_state.current_action == MOUSE_MODE_NONE) {
+        struct application *application = window_manager_focused_application(&g_window_manager);
+        struct window *focused = recover_application_focused_window(application, 0);
+        if (focused && focused->id != g_window_manager.focused_window_id &&
+            !window_check_flag(focused, WINDOW_MINIMIZE) &&
+            __sync_bool_compare_and_swap(&focused->id_ptr, &focused->id, &focused->id)) {
+            window_did_receive_focus(&g_window_manager, &g_mouse_state, focused);
+            event_signal_push(SIGNAL_WINDOW_FOCUSED, focused);
+        }
+    }
     if (!g_mouse_state.window)       goto res;
 
     if (!__sync_bool_compare_and_swap(&g_mouse_state.window->id_ptr, &g_mouse_state.window->id, &g_mouse_state.window->id)) {

@@ -71,7 +71,7 @@ function reply(value, status = 0) {
     task.callback({ status, output: JSON.stringify(value), error: status ? 'failure' : '' });
 }
 function expectCommand(args) { assert.deepEqual(Array.from(tasks[0].args), ['-m', ...args]); }
-function idle() { assert.equal(keys.size, 2); assert.equal(renderers.size, 0); }
+function idle() { assert.equal(keys.size, 6); assert.equal(renderers.size, 0); }
 const space = { id: 102, display: 1, 'is-visible': true, 'has-focus': true, index: 2, type: 'ratpoison', frames: [
     { id: 0, x: 0, y: 38, w: 500, h: 800, selected: true, windows: [10, 20], 'active-window': 10 },
     { id: 7, x: 500, y: 38, w: 500, h: 800, selected: false, windows: [], 'active-window': 0 }
@@ -104,6 +104,9 @@ idle();
 open();
 assert.equal(hintCancellations, 1);
 assert.ok(lastMenu.text.includes('F7 [empty]'));
+assert.ok(lastMenu.badges.some(b=>b.state==='empty'));
+assert.ok(lastMenu.highlights.some(h=>h.state==='empty'));
+
 assert.ok(lastMenu.text.includes('r ratpoison   f floating   b bsp'));
 assert.equal(renderers.size, 1);
 press('1'); expectCommand(['window', '--focus', '20']); reply(null); idle();
@@ -117,6 +120,39 @@ for (const [key, direction] of [['left', 'west'], ['h', 'west'], ['down', 'south
                                 ['up', 'north'], ['k', 'north'], ['right', 'east'], ['l', 'east']]) {
     open(); press(key); expectCommand(['space', '2', '--focus-frame', direction]); reply(null); refresh();
     press('escape'); idle();
+}
+// Both arrow bindings move the actual focused window, even with an empty
+// frame selected. The menu stays open; global moves leave it closed.
+const moveFrames = {...space, frames:[
+    {id:0, selected:false, x:500,y:500,w:500,h:500,windows:[10,20],'active-window':20},
+    {id:1, selected:true, x:0,y:500,w:500,h:500,windows:[],'active-window':0},
+    {id:2, selected:false, x:1000,y:500,w:500,h:500,windows:[30],'active-window':30},
+    {id:3, selected:false, x:500,y:0,w:500,h:500,windows:[],'active-window':0},
+    {id:4, selected:false, x:500,y:1000,w:500,h:500,windows:[],'active-window':0}
+]};
+for (const [key,target] of [['left',1],['right',2],['up',3],['down',4]]) {
+    for (const menu of [false,true]) {
+        if (menu) open(moveFrames); else resetShortcuts();
+        press(key,menu ? ['shift'] : ['cmd','shift']); refresh(moveFrames);
+        expectCommand(['window','10','--frame',String(target)]); reply(null);
+        if (menu) { refresh(moveFrames); assert.equal(renderers.size,1); press('escape'); }
+        idle();
+    }
+}
+// At an edge, do nothing; missing focus and unmanaged windows are also ignored.
+for (const currentWindows of [windows, windows.map(w=>({...w,'has-focus':false})),
+                              [{id:99,'has-focus':true}]]) {
+    open(); press('left',['shift']); refresh(space,currentWindows);
+    assert.equal(tasks.length,0); assert.equal(renderers.size,1); press('escape'); idle();
+}
+// Cancellation during the fresh-focus query prevents a late move.
+open(moveFrames); press('right',['shift']); press('escape'); refresh(moveFrames);
+assert.equal(tasks.length,0); idle();
+// BSP retains directional warp; floating windows move in logical points.
+for (const [type,arg] of [['bsp','--warp'],['float','--move']]) {
+    open({...space,type}); press('right',['shift']); refresh({...space,type});
+    expectCommand(['window','10',arg,type==='bsp'?'east':'rel:40:0']); reply(null);
+    refresh({...space,type}); press('escape'); idle();
 }
 // Fast prefix + direction is buffered while asynchronous queries load.
 press('s', ['cmd']); press('l'); refresh();
@@ -413,7 +449,7 @@ for (const [key, ratio] of [['1','1:2'],['2','1:1'],['3','2:1']]) {
 open(badgeSpace); press('/'); reply([badgeSpace]); reply(windows.map(w => ({...w, space: 2})));
 assert.equal(lastMenu.search.length, 2); // Empty frame is not a window match.
 assert.equal(lastMenu.search[0].text, 'Terminal: One');
-assert.equal(keys.size, 3); // Global prefix, fullscreen shortcut, and Escape remain.
+assert.equal(keys.size, 7); // Six global shortcuts and Escape remain.
 assert.equal(tasks.length, 0);
 const [searchId, searchCallback] = [...renderers.entries()][0];
 renderers.delete(searchId); searchCallback({status:0, output:JSON.stringify({selection:1})});
@@ -573,10 +609,58 @@ const overlaySpace = {...space, frames:[space.frames[0], {...space.frames[1], wi
 const overlayWindows = windows.concat([{id:30, app:'Browser',title:'Front','has-focus':false,frame:windows[0].frame}]);
 open(overlaySpace, overlayWindows);
 assert.equal(lastMenu.badges.find(b => b.key === '0').state, 'focused');
-assert.equal(lastMenu.badges.find(b => b.key === '1').state, 'normal');
+assert.equal(lastMenu.badges.find(b => b.key === '1').state, 'covered');
 assert.equal(lastMenu.badges.find(b => b.key === '2').state, 'front');
+assert.equal(lastMenu.groups.filter(g=>g.selected).length,1);
+assert.equal(lastMenu.groups.find(g=>g.selected).display,space.display);
+assert.equal(lastMenu.highlights.filter(h=>h.state==='front').length,1);
+const frontHighlight=lastMenu.highlights.find(h=>h.state==='front');
+assert.ok(lastMenu.text.split('\n')[frontHighlight.line].slice(frontHighlight.start,frontHighlight.start+frontHighlight.length).includes('Browser: Front'));
+
 press('escape'); idle();
 
+// Covered windows have distinct stable colors shared by menu cells and
+// frame index labels. Focus/stack ordering must not recolor their identities.
+const colorSpace = {...space,frames:[{...space.frames[0],windows:[10,20,30,40]},space.frames[1]]};
+const colorWindows = windows.concat([{id:30,app:'Editor',title:'Covered Three','has-focus':false},
+                                    {id:40,app:'Editor',title:'Covered Four','has-focus':false}]);
+open(colorSpace,colorWindows);
+const faint = lastMenu.badges.filter(b=>b.state==='covered');
+assert.equal(faint.length,3);
+assert.equal(new Set(faint.map(b=>b.color)).size,3);
+const originalFaint = Object.fromEntries(faint.map(b=>[b.key,b.color]));
+for (const badge of faint) {
+    assert.match(badge.color,/^#[0-9a-f]{6}$/);
+    const highlight=lastMenu.highlights.find(h=>h.color===badge.color);
+    assert.ok(highlight);
+    assert.equal(highlight.state,'covered');
+    assert.ok(lastMenu.text.split('\n')[highlight.line].slice(highlight.start,highlight.start+highlight.length).includes('W'+badge.key));
+}
+press('escape'); idle();
+press('s',['cmd']); refresh({...colorSpace,frames:[{...colorSpace.frames[0],'active-window':20},space.frames[1]]},
+                            colorWindows.map(w=>({...w,'has-focus':w.id===20})));
+for (const key of ['2','3']) assert.equal(lastMenu.badges.find(b=>b.key===key).color,originalFaint[key]);
+press('escape'); idle();
+press('s',['cmd']); refresh(colorSpace,colorWindows);
+assert.equal(lastMenu.badges.find(b=>b.key==='1').color,originalFaint['1']);
+press('escape'); idle();
+// Minimized windows are visible in the overview, gray, and have no index
+// overlay at their old location. Choosing one restores it before focusing.
+const minimizedWindow = {id:50,app:'Editor',title:'Minimized',frame:{x:0,y:0,w:500,h:400},'is-minimized':true,'has-focus':false};
+const minSpace = {...space,type:'float'};
+open(minSpace,windows.concat([minimizedWindow]));
+assert.ok(lastMenu.text.includes('[minimized]'));
+assert.equal(lastMenu.highlights.filter(h=>h.state==='minimized').length,1);
+assert.ok(!lastMenu.badges.some(b=>b.key==='2'));
+press('2'); expectCommand(['query','--spaces']); reply([minSpace]);
+expectCommand(['query','--spaces','--space']); reply(minSpace);
+expectCommand(['query','--windows','--window','50']); reply({...minimizedWindow,space:2});
+expectCommand(['window','--deminimize','50']); reply(null);
+expectCommand(['query','--windows','--window','50']); reply({...minimizedWindow,space:2,'is-minimized':false});
+expectCommand(['window','--focus','50']); reply(null); refresh(minSpace); press('escape'); idle();
+open(space,windows.concat([minimizedWindow]));
+assert.ok(lastMenu.highlights.some(h=>h.state==='minimized'));
+assert.ok(!lastMenu.badges.some(b=>b.key==='2')); press('escape'); idle();
 // Warm cached display is immediate, but stale digit bindings never execute.
 open();
 const residentBefore = resident;
@@ -584,7 +668,7 @@ press('escape');
 const background = [...timers.entries()].find(([, timer]) => timer.delay === 0.08);
 assert.ok(background); timers.delete(background[0]); background[1](); refresh();
 assert.equal(renderers.size, 0);
-assert.equal(keys.size, 2);
+assert.equal(keys.size, 6);
 press('s', ['cmd']);
 assert.ok(lastMenu.groups.length > 0);
 assert.equal(resident, residentBefore);

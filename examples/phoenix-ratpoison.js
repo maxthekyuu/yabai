@@ -1,5 +1,7 @@
 /* Super-S (Command-S) prefix. Load through ~/.phoenix.js. The running yabai
  * daemon must support ratpoison frames. Release Command before the next key. */
+// Phoenix's require watcher reloads on a helper signal; no periodic subprocess.
+try { require('~/.local/state/gomao-appearance/ratpoison-state.js'); } catch (_) {}
 var yabaiRatpoison = (function () {
     var theme = typeof yabaiRatpoisonConfig === 'object' && yabaiRatpoisonConfig ? yabaiRatpoisonConfig : {};
     var executable = '/opt/homebrew/bin/yabai';
@@ -8,10 +10,31 @@ var yabaiRatpoison = (function () {
     var themeRevision = 0;
     var baseTheme = theme;
     var savedTheme = {};
+    var appearanceTheme = {}, appearanceStamp = null;
+    var lastResidentPayload = null;
     var configTask = null;
 
     function mergeTheme() {
-        theme = Object.assign({}, baseTheme, savedTheme, { colors: Object.assign({}, baseTheme.colors || {}, savedTheme.colors || {}) });
+        theme = Object.assign({}, baseTheme, savedTheme, appearanceTheme, {
+            colors: Object.assign({}, baseTheme.colors || {}, savedTheme.colors || {}, appearanceTheme.colors || {})
+        });
+    }
+
+    function readDesktopAppearance() {
+        var state = typeof gomaoRatpoisonDesktopState === 'object' ? gomaoRatpoisonDesktopState : null;
+        if (!state) return;
+        var stamp = JSON.stringify(state);
+        if (stamp === appearanceStamp) return;
+        appearanceStamp = stamp;
+        appearanceTheme = state.theme || {};
+        mergeTheme();
+        if (typeof Storage !== 'undefined') Storage.set('gomaoRatpoisonAppearance', state.appearance);
+        if (cachedPayload) cachedPayload.theme = theme;
+        if (lastResidentPayload) lastResidentPayload.theme = theme;
+        if (active && !searching && rendererTask === null && lastResidentPayload)
+            resident('update', lastResidentPayload);
+        else if (!active && cachedPayload) resident('prepare', cachedPayload);
+        else if (!active) scheduleRefresh(false);
     }
     // r/f/b select layouts; h/j/k/l navigate. Numbers select stable local windows.
     var alphabet = '0123456789acdegimnopqstuvwxyz';
@@ -178,10 +201,11 @@ var yabaiRatpoison = (function () {
         modal = null;
     }
 
-    function show(text, duration, groups, badges, search, onSelect, selections, cacheable) {
+    function show(text, duration, groups, badges, search, onSelect, selections, cacheable, highlights) {
         if (!search && !duration) {
-            var data = {text:text, groups:groups || [], badges:badges || [], selections:selections || [], theme:theme, screen:Screen.main().visibleFrame()};
+            var data = {text:text, groups:groups || [], badges:badges || [], selections:selections || [], highlights:highlights || [], theme:theme, screen:Screen.main().visibleFrame()};
             if (cacheable) cachedPayload = data;
+            if (!preparing) lastResidentPayload = data;
             resident(preparing ? 'prepare' : 'update', data);
             return;
         }
@@ -314,6 +338,57 @@ var yabaiRatpoison = (function () {
         return true;
     }
 
+    function frameNeighbour(frames, source, direction) {
+        var horizontal = direction === 'west' || direction === 'east';
+        var forward = direction === 'east' || direction === 'south';
+        var axis = horizontal ? 'x' : 'y', size = horizontal ? 'w' : 'h';
+        var cross = horizontal ? 'y' : 'x', crossSize = horizontal ? 'h' : 'w';
+        var best = null, distance = Infinity, offset = Infinity;
+        frames.forEach(function (target) {
+            if (target.id === source.id) return;
+            if (forward ? target[axis] + target[size] <= source[axis]
+                        : source[axis] + source[size] <= target[axis]) return;
+            if (target[cross] >= source[cross] + source[crossSize] ||
+                target[cross] + target[crossSize] <= source[cross]) return;
+            var gap = Math.trunc(Math.abs(forward ? target[axis] - source[axis] - source[size]
+                                                 : source[axis] - target[axis] - target[size]));
+            var shift = Math.abs(source[cross] + source[crossSize] / 2 - target[cross] - target[crossSize] / 2);
+            if (gap < distance || (gap === distance && shift < offset)) {
+                best = target; distance = gap; offset = shift;
+            }
+        });
+        return best;
+    }
+
+    function moveWindow(direction) {
+        var fromMenu = active, current = generation;
+        function valid() { return active === fromMenu && generation === current; }
+        // Take fresh focus even when the menu's selected frame is empty.
+        fetchSnapshot(function (model) {
+            if (!valid()) return;
+            if (!model) { error('could not query windows for movement'); return; }
+            var space = model.space;
+            var source = model.lists[space.id].filter(function (window) { return window['has-focus']; })[0];
+            if (!source) return;
+            var args = ['window', String(source.id)];
+            if (space.type === 'ratpoison') {
+                var frames = space.frames || [];
+                var owner = frames.filter(function (frame) { return frame.windows.indexOf(source.id) !== -1; })[0];
+                if (!owner) return;
+                var target = frameNeighbour(frames, owner, direction);
+                if (!target) return;
+                args = args.concat(['--frame', String(target.id)]);
+            } else if (space.type === 'float') {
+                var delta = {west:'-40:0', east:'40:0', north:'0:-40', south:'0:40'}[direction];
+                args = args.concat(['--move', 'rel:' + delta]);
+            } else {
+                args = args.concat(['--warp', direction]);
+            }
+            if (fromMenu) update(args);
+            else run(args);
+        }, 0, valid);
+    }
+
     function resizeMenu(space) {
         clearKeys();
         bind('escape', [], function () { load('windows'); });
@@ -360,6 +435,7 @@ var yabaiRatpoison = (function () {
                 if (space) navigate(space, windows, entry[2]);
                 else queuedDirection = entry[2];
             }
+            bind(entry[0], ['shift'], function () { moveWindow(entry[2]); });
             bind(entry[0], [], move);
             bind(entry[1], [], move);
         });
@@ -423,6 +499,26 @@ var yabaiRatpoison = (function () {
         return { x: frame.x, y: frame.y, w: frame.w, h: frame.h };
     }
 
+    // Golden-angle hues keyed by stable W numbers stay distinct within a
+    // frame and survive focus changes, stack reordering, and menu paging.
+    function coveredColor(number) {
+        var hue = (number * 137.508 % 360) / 60;
+        var lightness = 0.60, saturation = 0.28;
+        var chroma = (1 - Math.abs(2 * lightness - 1)) * saturation;
+        var offset = lightness - chroma / 2;
+        var x = chroma * (1 - Math.abs(hue % 2 - 1));
+        var rgb = [[chroma,x,0],[x,chroma,0],[0,chroma,x],[0,x,chroma],[x,0,chroma],[chroma,0,x]][Math.floor(hue)];
+        return '#' + rgb.map(function (value) { return Math.round((value + offset) * 255).toString(16).padStart(2,'0'); }).join('');
+    }
+
+    function windowAppearance(window, owner, number) {
+        if (window && window['is-minimized']) return {state:'minimized'};
+        if (window && window['has-focus']) return {state:'focused'};
+        if (window && (window['is-hidden'] || (owner && (owner['active-window'] || owner.windows[0]) !== window.id)))
+            return {state:'covered', color:coveredColor(number)};
+        return {state:'front'};
+    }
+
     function searchWindows(choose, currentSpace) {
         searching = true;
         var current = ++generation;
@@ -450,15 +546,16 @@ var yabaiRatpoison = (function () {
                     var owner = (space.frames || []).filter(function (frame) { return frame.windows.indexOf(window.id) !== -1; })[0];
                     var rect = space['is-visible'] && !window['is-minimized'] && !window['is-hidden']
                              ? (owner ? frameRect(owner) : window.frame) : undefined;
+                    var appearance = windowAppearance(window, owner, numbersBySpace[space.id][window.id]);
                     results.push({ window: window.id, space: space, rect: rect, text: text, pid: window.pid,
-                        hintState: window['has-focus'] ? 'focused' : (!owner || (owner['active-window'] || owner.windows[0]) === window.id ? 'front' : 'normal'),
+                        hintState:appearance.state, hintColor:appearance.color,
                         minimized: window['is-minimized'], hidden: window['is-hidden'], searchable: true,
                         label: 'S' + space.index + ' (' + space.display + ') W' + numbersBySpace[space.id][window.id] + ' ' + text +
                                (window['is-minimized'] ? ' [minimized]' : window['is-hidden'] ? ' [hidden]' : '') });
                 });
                 var search = results.map(function (entry, index) {
                     return { index: index, label: entry.label, text: entry.text, display: entry.space.display,
-                             rect: entry.rect, pid: entry.pid, hidden: entry.hidden, state: entry.hintState };
+                             rect: entry.rect, pid: entry.pid, hidden: entry.hidden, state: entry.hintState, color:entry.hintColor };
                 });
                 show('Window search', null, [], [], search, function (index) {
                     var entry = results[index];
@@ -589,10 +686,10 @@ var yabaiRatpoison = (function () {
         page = (page + pages.length) % pages.length;
         var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages.length, width),
                      clip('r ratpoison   f floating   b bsp   Shift-T toggle', width), ''];
-        var groups = [], badges = [], selections = [], hint = 0, pageChoices = {};
+        var groups = [], badges = [], selections = [], highlights = [], hint = 0, pageChoices = {};
         pages[page].forEach(function (group) {
             var start = lines.length;
-            var heading = ' Display ' + group.display + (group.continued ? ' (continued)' : '') + ' ';
+            var heading = ' Display ' + group.display + (group.continued ? ' (continued)' : '') + (group.display === space.display ? ' *' : '') + ' ';
             lines.push('┌' + heading + '─'.repeat(Math.max(0, width - heading.length - 2)) + '┐');
             var cells = group.entries.map(function (entry) {
                 var key = alphabet[entry.shortcut === undefined ? hint : entry.shortcut % alphabet.length];
@@ -600,7 +697,7 @@ var yabaiRatpoison = (function () {
                 pageChoices[key] = entry;
                 bind(key, [], function () { choose(entry); });
                 if (entry.rect && (!entry.space || entry.space.id === space.id || entry.space['is-visible'])) {
-                    badges.push({ key: key, rect: entry.rect, display: group.display, state: entry.hintState || "normal" });
+                    badges.push({ key: key, rect: entry.rect, display: group.display, state: entry.hintState || "normal", color:entry.hintColor });
                 }
                 return clip((entry.selected ? '> ' : '  ') + key + ' ' + entry.label, columnWidth);
             });
@@ -611,15 +708,20 @@ var yabaiRatpoison = (function () {
                 if (group.entries[row].selected) selections.push({ line: lines.length, start: 2, length: cells[row].length });
                 if (group.entries[row + usedRows] && group.entries[row + usedRows].selected)
                     selections.push({ line: lines.length, start: 2 + columnWidth + 3, length: cells[row + usedRows].length });
+                [row, row + usedRows].forEach(function (index, column) {
+                    var entry = group.entries[index];
+                    if (entry && entry.hintState) highlights.push({line:lines.length,
+                        start:2 + column * (columnWidth + 3), length:cells[index].length, state:entry.hintState, color:entry.hintColor});
+                });
                 lines.push('│ ' + line.padEnd(width - 4, ' ') + ' │');
             }
             lines.push('└' + '─'.repeat(width - 2) + '┘');
-            groups.push({ start: start, end: lines.length - 1, display: group.display });
+            groups.push({ start: start, end: lines.length - 1, display: group.display, selected:group.display === space.display });
         });
         if (!hint) lines.push('(no choices)');
         lines.push('Page ' + (page + 1) + '/' + pages.length + ' | ' + hint + '/' + entries.length +
                    ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
-        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'hjkl/arrows focus  Shift-F frames  Shift-M move  Shift-C config');
+        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'hjkl/arrows focus  Shift-arrows move window', 'Shift-F frames  Shift-M move  Shift-C config');
         if (space.type === 'ratpoison') {
             lines.push('Shift-S/V split   Shift-F frames', 'Shift-W remove    Shift-O only     Shift-Z fullscreen',
                        'Shift-R resize   Shift-J/K stack   Shift-E sizes   Shift-C config');
@@ -636,7 +738,7 @@ var yabaiRatpoison = (function () {
         if (title === 'visible windows / frames') cachedChoices = Object.keys(pageChoices).reduce(function (map, key) {
             map[key] = choiceIdentity(pageChoices[key]); return map;
         }, {});
-        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges, null, null, selections, title === 'visible windows / frames');
+        show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges, null, null, selections, title === 'visible windows / frames', highlights);
         if (!preparing && queuedChoice !== null) {
             var wanted = queuedChoice; queuedChoice = null;
             var match = entries.filter(function (entry) { return choiceIdentity(entry) === wanted; })[0];
@@ -867,13 +969,19 @@ var yabaiRatpoison = (function () {
                             entry.label = 'W' + entry.number + ' ' + entry.label;
                             var owner = (item.frames || []).filter(function (frame) { return frame.windows.indexOf(entry.window) !== -1; })[0];
                             entry.selected = local && (owner ? owner.selected && owner['active-window'] === entry.window : byId[entry.window] && byId[entry.window]['has-focus']);
-                            entry.hintState = byId[entry.window] && byId[entry.window]['has-focus'] ? 'focused' :
-                                (!owner || (owner['active-window'] || owner.windows[0]) === entry.window ? 'front' : 'normal');
+                            var window = byId[entry.window];
+                            var appearance = windowAppearance(window, owner, entry.number);
+                            entry.hintState = appearance.state; entry.hintColor = appearance.color;
+                            entry.minimized = window && window['is-minimized'];
+                            if (entry.minimized) {
+                                entry.rect = undefined;
+                                entry.label += ' [minimized]';
+                            }
                         } else if (entry.frame !== undefined) {
                             entry.selected = local && (item.frames || []).some(function (frame) { return frame.id === entry.frame && frame.selected; });
                             var frame = (item.frames || []).filter(function (frame) { return frame.id === entry.frame; })[0];
                             var front = frame && byId[frame['active-window'] || frame.windows[0]];
-                            entry.hintState = front ? (front['has-focus'] ? 'focused' : 'front') : 'normal';
+                            entry.hintState = front ? (front['has-focus'] ? 'focused' : 'front') : 'empty';
                         }
                         entry.label = prefix + entry.label;
                         (background ? covered : entries).push(entry);
@@ -899,11 +1007,11 @@ var yabaiRatpoison = (function () {
                             var managed = {};
                             frames.forEach(function (frame) { frame.windows.forEach(function (id) { managed[id] = true; }); });
                             lists[item.id].filter(function (window) {
-                                return !managed[window.id] && !window['is-minimized'] && !window['is-hidden'];
+                                return !managed[window.id] && !window['is-hidden'];
                             }).forEach(function (window) { add({ window: window.id, rect: window.frame, label: '  ' + name(window.id) }); });
                         }
                     } else {
-                        var available = lists[item.id].filter(function (window) { return !window['is-minimized'] && !window['is-hidden']; });
+                        var available = lists[item.id].filter(function (window) { return !window['is-hidden']; });
                         if (mode === 'frames' || !available.length) add({ container: true, label: '[' + item.type + (available.length ? ']' : ', empty]') });
                         else available.sort(function (a, b) { return a.id - b.id; }).forEach(function (window) {
                             add({ window: window.id, rect: window.frame, label: (window['has-focus'] ? '* ' : '  ') + name(window.id) });
@@ -914,7 +1022,7 @@ var yabaiRatpoison = (function () {
                     var allEntries = entries.concat(covered);
                     if (mode !== 'frames') stableShortcuts(allEntries, visible, space);
                     choices(allEntries, mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
-                        if (entry.space.id !== space.id) { visit(entry, null); return; }
+                        if (entry.space.id !== space.id || entry.minimized) { visit(entry, null); return; }
                         if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
                         else if (entry.window !== undefined) command(['window', '--focus', String(entry.window)]);
                         else load('windows');
@@ -1027,7 +1135,7 @@ var yabaiRatpoison = (function () {
         latency('prefix-key');
         var cached = cachedPayload && JSON.stringify(cachedPayload.screen) === JSON.stringify(Screen.main().visibleFrame());
         var oldChoices = cachedChoices;
-        if (cached) resident('show', cachedPayload);
+        if (cached) { lastResidentPayload = cachedPayload; resident('show', cachedPayload); }
         else resident('update', {text:'YABAI  Loading windows…\nEsc close', theme:theme, screen:Screen.main().visibleFrame()});
         queuedChoice = null;
         load('windows');
@@ -1036,6 +1144,7 @@ var yabaiRatpoison = (function () {
         });
     }
 
+    readDesktopAppearance();
     Task.run('/usr/bin/python3', [settingsBackend, 'theme'], function (task) {
         if (task.status !== 0 || themeRevision !== 0) return;
         var result;
@@ -1047,6 +1156,11 @@ var yabaiRatpoison = (function () {
         if (!repeated) command(['window', '--toggle', 'windowed-fullscreen']);
     });
     Key.on('s', ['cmd'], function (_, repeated) { if (!repeated) start(); });
+    [['left', 'west'], ['down', 'south'], ['up', 'north'], ['right', 'east']].forEach(function (entry) {
+        Key.on(entry[0], ['cmd', 'shift'], function (_, repeated) {
+            if (!repeated) moveWindow(entry[1]);
+        });
+    });
     ['windowDidOpen', 'windowDidClose', 'windowDidFocus', 'windowDidMove', 'windowDidResize',
      'windowDidMinimize', 'windowDidUnminimize', 'appDidHide', 'appDidShow'].forEach(function (event) {
         Event.on(event, function (item) {

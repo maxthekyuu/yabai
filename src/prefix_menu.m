@@ -68,11 +68,28 @@ static NSRegularExpression *menu_expression(NSString *pattern)
     return expression;
 }
 
+static BOOL entry_state_valid(id state)
+{
+    return [state isKindOfClass:NSString.class] && [@[@"normal", @"front", @"focused", @"empty", @"covered", @"minimized"] containsObject:state];
+}
+
+static NSColor *entry_color(NSString *state, id explicitColor, BOOL menu, NSColor *fallback)
+{
+    if (theme_hex_valid(explicitColor)) return terminal_color((unsigned)strtoul([explicitColor UTF8String] + 1, NULL, 16));
+    if ([state isEqual:@"minimized"]) return theme_color(@"minimizedWindow", 0x707070);
+    if ([state isEqual:@"covered"]) return theme_color(@"text", 0xc0c0c0);
+    if ([state isEqual:@"front"]) return theme_color(@"hintFront", 0xffff55);
+    if ([state isEqual:@"focused"]) return menu ? theme_color(@"selectionText", 0xffffff) : theme_color(@"hintFocused", 0xff5555);
+    if ([state isEqual:@"empty"]) return theme_color(@"emptyFrame", 0x5555ff);
+    return fallback;
+}
+
 @interface PrefixMenuView : NSView
 @property(nonatomic, strong) NSArray<NSString *> *lines;
 @property(nonatomic, strong) NSFont *font;
 @property(nonatomic, strong) NSArray *groups;
 @property(nonatomic, strong) NSArray *selections;
+@property(nonatomic, strong) NSArray *highlights;
 @property(nonatomic) CGFloat lineHeight;
 @end
 
@@ -86,6 +103,12 @@ static NSRegularExpression *menu_expression(NSString *pattern)
     CGFloat y = 14;
     for (NSUInteger i = 0; i < self.lines.count; ++i) {
         NSString *line = self.lines[i];
+        for (NSDictionary *group in self.groups) {
+            if ([group[@"selected"] boolValue] && i >= [group[@"start"] unsignedIntegerValue] && i <= [group[@"end"] unsignedIntegerValue]) {
+                [theme_color(@"selectedDisplayBackground", 0x182828) setFill];
+                NSRectFill(NSMakeRect(14, y, self.bounds.size.width - 28, self.lineHeight));
+            }
+        }
         NSColor *color = theme_color(@"text", 0xc0c0c0);
         if (i == 0) color = theme_color([line hasPrefix:@"yabai:"] ? @"error" : @"title", [line hasPrefix:@"yabai:"] ? 0xff5555 : 0x55ffff);
         else if (i == 1) color = theme_color(@"accent", 0xffff55);
@@ -113,7 +136,7 @@ static NSRegularExpression *menu_expression(NSString *pattern)
                 NSRegularExpression *expression = menu_expression(pattern);
                 for (NSTextCheckingResult *match in [expression matchesInString:line options:0 range:NSMakeRange(0, line.length)]) {
                     [text addAttribute:NSForegroundColorAttributeName
-                                 value:theme_color([pattern hasPrefix:@"\\*"] ? @"activeFrame" : @"emptyFrame", [pattern hasPrefix:@"\\*"] ? 0x55ff55 : 0xffff55) range:match.range];
+                                 value:theme_color([pattern hasPrefix:@"\\*"] ? @"activeFrame" : @"emptyFrame", [pattern hasPrefix:@"\\*"] ? 0x55ff55 : 0x5555ff) range:match.range];
                 }
             }
         }
@@ -129,6 +152,7 @@ static NSRegularExpression *menu_expression(NSString *pattern)
                 [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(0, 1)];
                 [text addAttribute:NSForegroundColorAttributeName value:outline range:NSMakeRange(line.length - 1, 1)];
             }
+
         }
         // Explicit UTF-16 cell ranges distinguish the selected entry from its
         // neighbour in a two-column chooser. Frame markers alone are ambiguous.
@@ -145,12 +169,25 @@ static NSRegularExpression *menu_expression(NSString *pattern)
                 [[NSFontManager sharedFontManager] convertFont:self.font toHaveTrait:NSBoldFontMask];
             [text addAttributes:@{NSFontAttributeName:selectedFont, NSForegroundColorAttributeName:theme_color(@"selectionText", 0xffffff)} range:range];
         }
+        // State colors apply per cell after selection backgrounds, so empty
+        // frames remain blue even when selected, including in column two.
+        for (NSDictionary *highlight in self.highlights) {
+            if ([highlight[@"line"] unsignedIntegerValue] != i) continue;
+            NSRange range = NSMakeRange([highlight[@"start"] unsignedIntegerValue], [highlight[@"length"] unsignedIntegerValue]);
+            if (NSMaxRange(range) <= line.length)
+                [text addAttribute:NSForegroundColorAttributeName value:entry_color(highlight[@"state"], highlight[@"color"], YES, color) range:range];
+        }
         // Paint the selected frame number last so the cell selection cannot
         // overwrite its color. Leave neighbouring and covered frame labels alone.
         if (i > 1) {
             NSRegularExpression *frame = menu_expression(@"\\* (F[0-9]+)");
-            for (NSTextCheckingResult *match in [frame matchesInString:line options:0 range:NSMakeRange(0, line.length)])
-                [text addAttribute:NSForegroundColorAttributeName value:theme_color(@"selectedFrameNumber", 0xff5555) range:[match rangeAtIndex:1]];
+            for (NSTextCheckingResult *match in [frame matchesInString:line options:0 range:NSMakeRange(0, line.length)]) {
+                BOOL empty = NO;
+                for (NSDictionary *highlight in self.highlights)
+                    if ([highlight[@"line"] unsignedIntegerValue] == i && [highlight[@"state"] isEqual:@"empty"] &&
+                        NSLocationInRange(match.range.location, NSMakeRange([highlight[@"start"] unsignedIntegerValue], [highlight[@"length"] unsignedIntegerValue]))) empty = YES;
+                if (!empty) [text addAttribute:NSForegroundColorAttributeName value:theme_color(@"selectedFrameNumber", 0xff5555) range:[match rangeAtIndex:1]];
+            }
         }
         [text drawAtPoint:NSMakePoint(14, y)];
         [NSGraphicsContext restoreGraphicsState];
@@ -166,7 +203,7 @@ static NSRegularExpression *menu_expression(NSString *pattern)
 - (BOOL)canBecomeMainWindow { return NO; }
 @end
 
-static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSFont *font, NSColor *color)
+static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSArray *colors, NSFont *font, NSColor *color)
 {
     NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:keys attributes:@{
         NSFontAttributeName:font, NSForegroundColorAttributeName:menu_theme[@"colors"][@"hintText"] ? theme_color(@"hintText", 0) : color }];
@@ -174,12 +211,12 @@ static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSFont *fo
         NSString *state = states[i];
         if ([state isEqual:@"normal"]) continue;
         BOOL focused = [state isEqual:@"focused"];
-        NSFontTraitMask wanted = NSBoldFontMask | (focused ? NSItalicFontMask : 0);
+        NSFontTraitMask wanted = ([state isEqual:@"front"] || [state isEqual:@"empty"] || focused ? NSBoldFontMask : 0) | (focused ? NSItalicFontMask : 0);
         NSFont *styled = [[NSFontManager sharedFontManager] convertFont:font toHaveTrait:wanted];
         NSFontTraitMask actual = [[NSFontManager sharedFontManager] traitsOfFont:styled];
         NSMutableDictionary *attributes = [@{NSFontAttributeName:styled,
-            NSForegroundColorAttributeName:theme_color(focused ? @"hintFocused" : @"hintFront", focused ? 0xff5555 : 0xffff55)} mutableCopy];
-        if (!(actual & NSBoldFontMask)) attributes[NSStrokeWidthAttributeName] = @-2;
+            NSForegroundColorAttributeName:entry_color(state, i < colors.count ? colors[i] : nil, NO, color)} mutableCopy];
+        if ((wanted & NSBoldFontMask) && !(actual & NSBoldFontMask)) attributes[NSStrokeWidthAttributeName] = @-2;
         if (focused && !(actual & NSItalicFontMask)) attributes[NSObliquenessAttributeName] = @0.2;
         if (i * 2 < keys.length) [text addAttributes:attributes range:NSMakeRange(i * 2, 1)];
     }
@@ -189,6 +226,7 @@ static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSFont *fo
 @interface PrefixHintView : NSView
 @property(nonatomic, strong) NSString *keys;
 @property(nonatomic, strong) NSArray *states;
+@property(nonatomic, strong) NSArray *colors;
 @property(nonatomic, strong) NSAttributedString *styledText;
 @property(nonatomic, strong) NSDictionary *theme;
 @property(nonatomic, strong) NSFont *font;
@@ -222,7 +260,7 @@ static NSArray *hint_layout(id badges, NSFont *font)
     for (id badge in badges) {
         if (![badge isKindOfClass:NSDictionary.class]) return nil;
         NSString *state = badge[@"state"] ?: @"normal";
-        if (![@[@"normal", @"front", @"focused"] containsObject:state]) return nil;
+        if (!entry_state_valid(state) || (badge[@"color"] && !theme_hex_valid(badge[@"color"]))) return nil;
         NSString *key = badge[@"key"];
         NSDictionary *rect = badge[@"rect"];
         if (![key isKindOfClass:NSString.class] || key.length != 1 ||
@@ -249,10 +287,11 @@ static NSArray *hint_layout(id badges, NSFont *font)
         if (match) {
             match[@"keys"] = [match[@"keys"] stringByAppendingFormat:@" %@", key];
             [match[@"states"] addObject:state];
-        } else [groups addObject:[@{ @"keys":key, @"states":[NSMutableArray arrayWithObject:state], @"cx":@(x), @"cy":@(y), @"display":badge[@"display"] } mutableCopy]];
+            [match[@"colors"] addObject:badge[@"color"] ?: NSNull.null];
+        } else [groups addObject:[@{ @"keys":key, @"states":[NSMutableArray arrayWithObject:state], @"colors":[NSMutableArray arrayWithObject:badge[@"color"] ?: NSNull.null], @"cx":@(x), @"cy":@(y), @"display":badge[@"display"] } mutableCopy]];
     }
     for (NSMutableDictionary *group in groups) {
-        NSSize text = hint_text(group[@"keys"], group[@"states"], font, display_color([group[@"display"] unsignedIntegerValue])).size;
+        NSSize text = hint_text(group[@"keys"], group[@"states"], group[@"colors"], font, display_color([group[@"display"] unsignedIntegerValue])).size;
         CGFloat width = MAX(28, ceil(text.width) + 16), height = MAX(28, ceil(text.height) + 10);
         group[@"x"] = @([group[@"cx"] doubleValue] - width / 2);
         group[@"y"] = @([group[@"cy"] doubleValue] - height / 2);
@@ -265,14 +304,14 @@ static PrefixHintView *hint_view(NSDictionary *hint, NSFont *font, PrefixHintVie
 {
     NSColor *color = display_color([hint[@"display"] unsignedIntegerValue]);
     if (existing && [existing.keys isEqual:hint[@"keys"]] && [existing.states isEqual:hint[@"states"]] &&
-        [existing.font isEqual:font] && [existing.color isEqual:color] && [existing.theme isEqual:menu_theme]) return existing;
+        [existing.colors isEqual:hint[@"colors"]] && [existing.font isEqual:font] && [existing.color isEqual:color] && [existing.theme isEqual:menu_theme]) return existing;
     PrefixHintView *view = existing ?: [[PrefixHintView alloc] initWithFrame:NSZeroRect];
     view.frame = NSMakeRect(0, 0, [hint[@"width"] doubleValue], [hint[@"height"] doubleValue]);
-    view.font = font; view.keys = hint[@"keys"]; view.states = hint[@"states"];
+    view.font = font; view.keys = hint[@"keys"]; view.states = hint[@"states"]; view.colors = hint[@"colors"];
     NSUInteger display = [hint[@"display"] unsignedIntegerValue];
     view.color = display_color(display);
     view.theme = menu_theme;
-    view.styledText = hint_text(view.keys, view.states, font, view.color);
+    view.styledText = hint_text(view.keys, view.states, view.colors, font, view.color);
     [view setNeedsDisplay:YES];
     return view;
 }
@@ -285,6 +324,8 @@ static BOOL search_entries_valid(id entries)
         if (![entry isKindOfClass:NSDictionary.class] || ![entry[@"label"] isKindOfClass:NSString.class] ||
             ![entry[@"text"] isKindOfClass:NSString.class] || ![entry[@"index"] isKindOfClass:NSNumber.class] ||
             ![entry[@"display"] isKindOfClass:NSNumber.class] || [entry[@"display"] integerValue] < 1) return NO;
+        if (entry[@"state"] && !entry_state_valid(entry[@"state"])) return NO;
+        if (entry[@"color"] && !theme_hex_valid(entry[@"color"])) return NO;
         if (entry[@"rect"] && !hint_layout(@[@{ @"key":@"0", @"rect":entry[@"rect"], @"display":entry[@"display"], @"state":entry[@"state"] ?: @"normal" }],
                                             (menu_font ?: [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular]))) return NO;
     }
@@ -322,7 +363,7 @@ static NSDictionary *search_layout(NSArray *entries, NSString *query, NSInteger 
     for (NSUInteger i = 0; i < pages.count; ++i) if ([pages[i] containsObject:@(selected)]) pageIndex = i;
     NSString *alphabet = @"0456789abcdefgimnopqrstuvwxyz";
     NSMutableArray *lines = [NSMutableArray arrayWithArray:@[@"Window search", @"", @""]];
-    NSMutableArray *groups = [NSMutableArray array], *badges = [NSMutableArray array], *indices = [NSMutableArray array];
+    NSMutableArray *groups = [NSMutableArray array], *badges = [NSMutableArray array], *indices = [NSMutableArray array], *highlights = [NSMutableArray array];
     display = -1;
     NSUInteger start = 0, keyIndex = 0;
     NSString *bottom = [@"└" stringByAppendingFormat:@"%@┘", [@"" stringByPaddingToLength:columns - 2 withString:@"─" startingAtIndex:0]];
@@ -338,9 +379,16 @@ static NSDictionary *search_layout(NSArray *entries, NSString *query, NSInteger 
         NSString *key = [alphabet substringWithRange:NSMakeRange(keyIndex++, 1)];
         NSString *label = [NSString stringWithFormat:@"%@ %@ %@", position.integerValue == selected ? @">" : @" ", key, entry[@"label"]];
         if (label.length > (NSUInteger)(columns - 4)) label = [[label substringToIndex:columns - 5] stringByAppendingString:@"…"];
+        NSMutableDictionary *highlight = [@{@"line":@(lines.count), @"start":@2, @"length":@(label.length), @"state":entry[@"state"] ?: @"normal"} mutableCopy];
+        if (entry[@"color"]) highlight[@"color"] = entry[@"color"];
+        [highlights addObject:highlight];
         [lines addObject:[NSString stringWithFormat:@"│ %@ │", [label stringByPaddingToLength:columns - 4 withString:@" " startingAtIndex:0]]];
         [indices addObject:entry[@"index"]];
-        if (entry[@"rect"]) [badges addObject:@{ @"key":key, @"rect":entry[@"rect"], @"display":@(display), @"state":entry[@"state"] ?: @"normal" }];
+        if (entry[@"rect"]) {
+            NSMutableDictionary *badge = [@{ @"key":key, @"rect":entry[@"rect"], @"display":@(display), @"state":entry[@"state"] ?: @"normal" } mutableCopy];
+            if (entry[@"color"]) badge[@"color"] = entry[@"color"];
+            [badges addObject:badge];
+        }
     }
     if (display != -1) { [lines addObject:bottom]; [groups addObject:@{ @"start":@(start), @"end":@(lines.count - 1), @"display":@(display) }]; }
     if (!matches.count) [lines addObject:@"No matching windows"];
@@ -348,7 +396,7 @@ static NSDictionary *search_layout(NSArray *entries, NSString *query, NSInteger 
     [lines addObject:@"Type to filter | arrows select | Enter focus"];
     [lines addObject:@"Tab: select by label / resume typing | Esc close"];
     return @{ @"text":[lines componentsJoinedByString:@"\n"], @"groups":groups, @"badges":badges,
-              @"indices":indices, @"matches":matches, @"selected":@(selected), @"pages":pages, @"page":@(pageIndex) };
+              @"highlights":highlights, @"indices":indices, @"matches":matches, @"selected":@(selected), @"pages":pages, @"page":@(pageIndex) };
 }
 
 @class PrefixSearchController;
@@ -383,6 +431,7 @@ static NSDictionary *search_layout(NSArray *entries, NSString *query, NSInteger 
     if (self.hintMode) lines[0] = @"Select a label key | Tab resumes typing";
     self.view.lines = lines;
     self.view.groups = self.state[@"groups"];
+    self.view.highlights = self.state[@"highlights"];
     [self.view setNeedsDisplay:YES];
     NSArray *hints = hint_layout(self.state[@"badges"], self.font);
     // Reuse small panels while typing; allocate only when a new center appears.
@@ -552,6 +601,19 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
             NSUInteger row = [selection[@"line"] unsignedIntegerValue], start = [selection[@"start"] unsignedIntegerValue], length = [selection[@"length"] unsignedIntegerValue];
             if (row >= lines.count || !length || start + length > [lines[row] length]) { fprintf(stderr, "selection range outside text\n"); return 1; }
         }
+        id highlights = payload[@"highlights"] ?: @[];
+        if (![highlights isKindOfClass:NSArray.class] || [highlights count] > 64) return 1;
+        for (id highlight in highlights) {
+            if (![highlight isKindOfClass:NSDictionary.class] || !entry_state_valid(highlight[@"state"]) ||
+                (highlight[@"color"] && !theme_hex_valid(highlight[@"color"]))) return 1;
+            for (NSString *field in @[@"line", @"start", @"length"]) {
+                id value = highlight[field];
+                if (![value isKindOfClass:NSNumber.class] || !isfinite([value doubleValue]) ||
+                    [value doubleValue] < 0 || [value doubleValue] > 1000000 || [value doubleValue] != [value unsignedIntegerValue]) return 1;
+            }
+            NSUInteger row = [highlight[@"line"] unsignedIntegerValue], start = [highlight[@"start"] unsignedIntegerValue], length = [highlight[@"length"] unsignedIntegerValue];
+            if (row >= lines.count || !length || start + length > [lines[row] length]) return 1;
+        }
         CGFloat lineHeight = ceil(font.ascender - font.descender + font.leading) + 2;
         CGFloat width = 0;
         for (NSString *line in lines) {
@@ -564,6 +626,7 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
         [view setNeedsDisplay:YES];
         view.font = font;
         view.selections = selections;
+        view.highlights = highlights;
         view.lines = lines;
         id groups = payload[@"groups"];
         if (groups && ![groups isKindOfClass:[NSArray class]]) return 1;
@@ -572,6 +635,7 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
             for (NSString *key in @[@"start", @"end", @"display"]) {
                 if (![group[key] isKindOfClass:[NSNumber class]]) return 1;
             }
+            if (group[@"selected"] && ![group[@"selected"] isKindOfClass:NSNumber.class]) return 1;
             if ([group[@"start"] integerValue] < 0 || [group[@"end"] unsignedIntegerValue] >= lines.count ||
                 [group[@"start"] unsignedIntegerValue] > [group[@"end"] unsignedIntegerValue] ||
                 [group[@"display"] integerValue] < 1) return 1;
@@ -583,7 +647,7 @@ static int render_menu(id payload, NSString *snapshotPath, PrefixMenuPanel *exis
             [view cacheDisplayInRect:view.bounds toBitmapImageRep:bitmap];
             NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
             if (![png writeToFile:[NSString stringWithUTF8String:snapshotPath.UTF8String] atomically:YES]) return 1;
-            NSDictionary *metrics = @{ @"font":font.fontName, @"size":@(font.pointSize), @"width":@(size.width), @"height":@(size.height), @"badges":hints, @"selections":selections, @"search":searchState ?: @{} };
+            NSDictionary *metrics = @{ @"font":font.fontName, @"size":@(font.pointSize), @"width":@(size.width), @"height":@(size.height), @"badges":hints, @"selections":selections, @"highlights":highlights, @"groups":groups ?: @[], @"search":searchState ?: @{} };
             NSData *json = [NSJSONSerialization dataWithJSONObject:metrics options:0 error:NULL];
             puts([[NSString alloc] initWithData:json encoding:NSUTF8StringEncoding].UTF8String);
             if (hints.count) {
