@@ -369,26 +369,46 @@ struct area window_node_content_area(struct window_node *node)
     return area;
 }
 
-void window_node_capture_windows(struct window_node *node, struct window_capture **window_list)
+static void window_node_capture_windows_on_space(struct window_node *node, struct window_capture **window_list,
+                                                 uint64_t sid, uint64_t (*lookup_space)(uint32_t))
 {
     if (window_node_is_leaf(node)) {
         for (int i = 0; i < node->window_count; ++i) {
             struct window *window = window_manager_find_window(&g_window_manager, node->window_list[i]);
-            if (window) {
+            if (window && (!lookup_space || (sid && lookup_space(window->id) == sid))) {
                 struct area area = window_node_content_area(node);
                 ts_buf_push(*window_list, ((struct window_capture) { .window = window, .x = area.x, .y = area.y, .w = area.w, .h = area.h }));
             }
         }
     } else {
-        window_node_capture_windows(node->left, window_list);
-        window_node_capture_windows(node->right, window_list);
+        window_node_capture_windows_on_space(node->left, window_list, sid, lookup_space);
+        window_node_capture_windows_on_space(node->right, window_list, sid, lookup_space);
     }
+}
+
+void window_node_capture_windows(struct window_node *node, struct window_capture **window_list)
+{
+    /* Explicit warp/swap operations may intentionally cross Space boundaries. */
+    window_node_capture_windows_on_space(node, window_list, 0, NULL);
 }
 
 void window_node_flush(struct window_node *node)
 {
+    struct window_node *root = node;
+    while (root->parent) root = root->parent;
+    struct view *owner = NULL;
+    table_for (struct view *view, g_space_manager.view, {
+        if (view->root == root) owner = view;
+    })
+    if (!owner) return;
+
+    /* Display origins can change while a dock enumerates its displays. Never
+     * apply old coordinates, or a cached Space's layout to a window macOS has
+     * already returned to another display. Unknown ownership must also wait. */
+    view_update(owner);
+    if (view_is_invalid(owner)) return;
     struct window_capture *window_list = NULL;
-    window_node_capture_windows(node, &window_list);
+    window_node_capture_windows_on_space(node, &window_list, owner->sid, window_space_without_fallback);
     if (window_list) window_manager_animate_window_list(window_list, ts_buf_len(window_list));
 }
 

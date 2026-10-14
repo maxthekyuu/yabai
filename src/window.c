@@ -66,7 +66,7 @@ static uint64_t window_display_space(uint32_t wid)
     return sid;
 }
 
-uint64_t window_space(uint32_t wid)
+uint64_t window_space_without_fallback(uint32_t wid)
 {
     uint64_t sid = 0;
 
@@ -85,6 +85,12 @@ free:
 err:
     CFRelease(window_list_ref);
 
+    return sid;
+}
+
+uint64_t window_space(uint32_t wid)
+{
+    uint64_t sid = window_space_without_fallback(wid);
     return sid ? sid : window_display_space(wid);
 }
 

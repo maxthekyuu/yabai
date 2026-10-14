@@ -24,6 +24,7 @@ typedef TEST_SIG(function);
     TEST_ENTRY(query_topology_lifetime)                         \
     TEST_ENTRY(query_topology_selectors)                        \
     TEST_ENTRY(window_display_move_geometry)                   \
+    TEST_ENTRY(window_layout_reconnect_ownership)               \
     TEST_ENTRY(window_geometry_fallback)                       \
     TEST_ENTRY(display_area_is_in_direction)                   \
     TEST_ENTRY(closest_display_in_direction)                    \
