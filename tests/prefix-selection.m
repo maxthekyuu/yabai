@@ -37,6 +37,22 @@ int main(void)
         assert([[states attribute:NSForegroundColorAttributeName atIndex:2 effectiveRange:NULL] isEqual:terminal_color(0x5555ff)]);
         assert([[states attribute:NSForegroundColorAttributeName atIndex:4 effectiveRange:NULL] isEqual:terminal_color(0x707070)]);
 
+        NSArray *multi = hint_layout(@[
+            @{@"key":@"00", @"prefix":@"0", @"display":@1, @"state":@"front", @"rect":@{@"x":@0,@"y":@0,@"w":@100,@"h":@100}},
+            @{@"key":@"01", @"prefix":@"0", @"display":@1, @"state":@"focused", @"rect":@{@"x":@0,@"y":@0,@"w":@100,@"h":@100}}
+        ], hintFont);
+        assert(multi.count == 1);
+        PrefixHintView *multiView = hint_view(multi[0], hintFont, nil);
+        assert([multiView.keys isEqual:@"00 01"]);
+        assert([multiView.styledText attribute:NSBackgroundColorAttributeName atIndex:0 effectiveRange:NULL]);
+        assert([multiView.styledText attribute:NSBackgroundColorAttributeName atIndex:3 effectiveRange:NULL]);
+        assert(![multiView.styledText attribute:NSBackgroundColorAttributeName atIndex:1 effectiveRange:NULL]);
+        assert([[multiView.styledText attribute:NSForegroundColorAttributeName atIndex:4 effectiveRange:NULL] isEqual:terminal_color(0xff5555)]);
+        NSMutableDictionary *unfiltered = [multi[0] mutableCopy];
+        unfiltered[@"prefixes"] = @[@"", @""];
+        multiView = hint_view(unfiltered, hintFont, multiView);
+        assert(![multiView.styledText attribute:NSBackgroundColorAttributeName atIndex:0 effectiveRange:NULL]);
+
         PrefixMenuView *view = [[PrefixMenuView alloc] initWithFrame:NSMakeRect(0, 0, 800, 120)];
         view.font = menu_font; view.lineHeight = 20;
         view.lines = @[@"YABAI", @"r / f / b", @"│   0 Terminal                  1 Browser",

@@ -230,7 +230,8 @@ window does not renumber the list. Closed windows release their numbers for
 reuse without shifting the remaining windows. Space UUIDs retain the scope when
 display or Space indices change. These assignments last for the Phoenix session.
 
-On the active Space, **0–9** select W0–W9. Larger lists use banks: W10–W19 use
+In the default `focus-local` selector mode, **0–9** select W0–W9 on the active Space.
+See [Selector label modes](#selector-label-modes) for stable Space-local and global alternatives. Larger lists use banks: W10–W19 use
 0–9 on the next bank, and so on. `[`/`]` or Page Up/Page Down traverse pages;
 small screens can split a bank over multiple pages without changing its keys.
 Letter shortcuts select empty frames and windows on other visible Spaces. Those
@@ -556,3 +557,57 @@ Space ID. The UI retries incomplete or unavailable snapshots and never executes
 buffered choices against an invalid snapshot. This requires the matching daemon
 build. Global `/` search continues using all-Space queries, so hidden desktops
 remain searchable. Existing query commands and schemas remain available.
+
+## Selector label modes
+
+Choose **Shift-C → Prefix selection → selectorMode** in the prefix menu, or save
+an override with the configuration bridge:
+
+```sh
+python3 scripts/ratpoison-config.py apply prefix.selectorMode global
+```
+
+The bridge saves the option in the managed block of `~/.yabairc`; it is a Phoenix
+prefix setting, not a `yabai -m config` setting. Changes made through Shift-C take
+effect when the configuration window closes. After using the command line,
+reload Phoenix to load the saved setting. The default remains `focus-local` for
+existing installations. An unsaved Phoenix configuration can also set
+`yabaiRatpoisonConfig.selectorMode` before loading the script; saved settings
+have precedence.
+
+| Mode | Labels and selection | Stability |
+| --- | --- | --- |
+| `focus-local` | Existing one-key shortcuts: local windows use digits, other visible Spaces use letters, with banks/pages for overflow. | Window numbers (`W0`, etc.) remain local to a Space, but shortcuts can change when focus moves to another Space. Frame-mode shortcuts are positional. |
+| `space-local` | A stable Space alias, `-`, then the local window number: `0-2`, `1-2`. Frames use `0-e7`; a floating/BSP container uses `0-c`. Type the label and press Return. | The Space alias and local numbers survive display focus changes; different Spaces can each have a local window 2. |
+| `global` | A single shared label namespace for windows, frames and containers. Type the label and press Return. | A window retains its label across focus and Space moves; frames and containers are identified within their owning Space. |
+
+Global labels use `0123456789acdegimnopqstuvwxyz`, excluding keys reserved for
+layout and directional commands. Labels grow in length: `0` through `z`, then
+`00`, `01`, and so on. Leading zeroes matter: `0` and `00` are different labels.
+Space aliases use the same encoding, independently of Mission Control numbering.
+Local window numbers and the daemon's frame IDs/CLI selectors are unchanged.
+
+In `space-local` and `global`, each typed character filters both menu entries
+and centered labels to matching prefixes. The matched part is highlighted;
+centered labels also underline it and add a background. Typing `0` keeps both
+`0` and `00` when present, including targets on other visible displays. Return
+selects **only an exact match**, even for a single-character label; it never
+selects a longer label merely because it is the only remaining match. Backspace
+removes a character and restores matches; Escape closes the chooser. An invalid
+prefix shows no choices until edited. Existing navigation/layout commands remain
+available. Hidden Spaces have no selectable labels. Minimized windows may appear
+in the list but have no centered badge.
+
+Filtering searches all current chooser targets, not just the current menu page.
+Centered labels cover all matching targets on visible Spaces; paging changes
+only the menu listing. Overlapping stack labels are grouped together. The window
+and frame choosers share the new namespaces. Search and move/destination menus
+retain their existing selection behavior.
+
+Assignments are kept in memory for one Phoenix session. New targets receive new
+global labels; labels and Space aliases are not recycled or compacted during
+that session. Invisible targets keep their reservations, and changing selector
+mode does not clear them. Reloading Phoenix resets assignments. Space-local
+window numbers can be reused after a window leaves its Space; frame IDs follow
+the daemon's existing frame lifecycle. These labels are interaction shortcuts,
+not persistent identifiers across restarts.

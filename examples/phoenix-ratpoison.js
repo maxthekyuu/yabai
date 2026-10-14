@@ -41,6 +41,30 @@ var yabaiRatpoison = (function () {
     var keys = [];
     var windowNumbers = {};
     var shortcutSlots = {};
+    // Never recycle these session reservations: invisible targets retain labels.
+    var globalLabels = {}, spaceAliases = {};
+    function selectorMode() {
+        return ['global', 'space-local'].indexOf(theme.selectorMode) !== -1 ? theme.selectorMode : 'focus-local';
+    }
+    // Shortlex: 0..z, 00..0z, 10... (leading zeroes are significant).
+    function selectorCode(number) {
+        var result = '';
+        do {
+            result = alphabet[number % alphabet.length] + result;
+            number = Math.floor(number / alphabet.length) - 1;
+        } while (number >= 0);
+        return result;
+    }
+    function stableLabels(entries) {
+        entries.slice().sort(function (a, b) { return choiceIdentity(a).localeCompare(choiceIdentity(b)); }).forEach(function (entry) {
+            var scope = spaceIdentity(entry.space);
+            var identity = entry.window !== undefined ? 'w' + entry.window : choiceIdentity(entry);
+            if (globalLabels[identity] === undefined) globalLabels[identity] = selectorCode(Object.keys(globalLabels).length);
+            if (spaceAliases[scope] === undefined) spaceAliases[scope] = selectorCode(Object.keys(spaceAliases).length);
+            entry.selectorLabel = selectorMode() === 'global' ? globalLabels[identity] : spaceAliases[scope] + '-' +
+                (entry.window !== undefined ? String(entry.number) : entry.frame !== undefined ? 'e' + entry.frame : 'c');
+        });
+    }
     var transitionTimer = null;
     var modal = null;
     var rendererTask = null;
@@ -55,7 +79,7 @@ var yabaiRatpoison = (function () {
     var sending = false, pendingMessage = null, residentEpoch = 0;
     var cachedPayload = null, preparing = false, refreshTimer = null, dataGeneration = 0;
     var normalMenu = false;
-    var cachedChoices = {}, queuedChoice = null;
+    var cachedChoices = {}, queuedChoice = null, queuedPrefix = null;
     function choiceIdentity(entry) {
         return spaceIdentity(entry.space) + (entry.window !== undefined ? ":w" + entry.window : entry.frame !== undefined ? ":f" + entry.frame : ":container");
     }
@@ -418,6 +442,7 @@ var yabaiRatpoison = (function () {
             try { result = JSON.parse(task.output); } catch (_) {}
             if (result && result.theme && typeof result.theme === 'object') {
                 savedTheme = result.theme;
+                cachedPayload = null; cachedChoices = {};
                 mergeTheme();
                 ++themeRevision;
             }
@@ -625,14 +650,19 @@ var yabaiRatpoison = (function () {
         entries.sort(function (a, b) { return a.shortcut - b.shortcut; });
     }
 
-    function choices(entries, title, space, windows, choose, page) {
+    function choices(entries, title, space, windows, choose, page, typed, allEntries) {
+        if (!preparing && queuedPrefix !== null) { typed = queuedPrefix; queuedPrefix = null; }
+        typed = typed || '';
+        var extended = entries.some(function (entry) { return entry.selectorLabel !== undefined; }) || !!allEntries;
+        allEntries = allEntries || entries;
+        if (extended) entries = allEntries.filter(function (entry) { return entry.selectorLabel.indexOf(typed) === 0; });
         clearKeys();
         controls(space, windows);
         var screen = Screen.main().visibleFrame();
         var columns = screen.width >= 1100 ? 2 : 1;
         // Allow the panel to grow to 90% of the usable height. Reserve text
         // rows for headings, controls and a permanent pagination status line.
-        var chromeRows = space.type === 'ratpoison' ? 10 : 7;
+        var chromeRows = (space.type === 'ratpoison' ? 10 : 7) + (extended ? 1 : 0);
         var fontSize = Number(theme.fontSize) || 12;
         var rowHeight = Math.ceil(fontSize * 1.5);
         var cellWidth = fontSize * 2 / 3;
@@ -692,10 +722,10 @@ var yabaiRatpoison = (function () {
             var heading = ' Display ' + group.display + (group.continued ? ' (continued)' : '') + (group.display === space.display ? ' *' : '') + ' ';
             lines.push('┌' + heading + '─'.repeat(Math.max(0, width - heading.length - 2)) + '┐');
             var cells = group.entries.map(function (entry) {
-                var key = alphabet[entry.shortcut === undefined ? hint : entry.shortcut % alphabet.length];
+                var key = extended ? entry.selectorLabel : alphabet[entry.shortcut === undefined ? hint : entry.shortcut % alphabet.length];
                 ++hint;
                 pageChoices[key] = entry;
-                bind(key, [], function () { choose(entry); });
+                if (!extended) bind(key, [], function () { choose(entry); });
                 if (entry.rect && (!entry.space || entry.space.id === space.id || entry.space['is-visible'])) {
                     badges.push({ key: key, rect: entry.rect, display: group.display, state: entry.hintState || "normal", color:entry.hintColor });
                 }
@@ -712,12 +742,30 @@ var yabaiRatpoison = (function () {
                     var entry = group.entries[index];
                     if (entry && entry.hintState) highlights.push({line:lines.length,
                         start:2 + column * (columnWidth + 3), length:cells[index].length, state:entry.hintState, color:entry.hintColor});
+                    if (entry && extended && typed) highlights.push({line:lines.length,
+                        start:4 + column * (columnWidth + 3), length:typed.length, state:'normal', color:theme.colors && theme.colors.accent || '#ffff55'});
                 });
                 lines.push('│ ' + line.padEnd(width - 4, ' ') + ' │');
             }
             lines.push('└' + '─'.repeat(width - 2) + '┘');
             groups.push({ start: start, end: lines.length - 1, display: group.display, selected:group.display === space.display });
         });
+        if (extended) {
+            // Labels on every visible target participate, even beyond the menu page.
+            badges = entries.filter(function (entry) { return entry.rect && entry.space['is-visible'] !== false; }).map(function (entry) {
+                return {key:entry.selectorLabel, prefix:typed, rect:entry.rect, display:entry.space.display,
+                    state:entry.hintState || 'normal', color:entry.hintColor};
+            });
+            alphabet.split('').concat(['-']).forEach(function (key) {
+                bind(key, [], function () { choices(allEntries, title, space, windows, choose, 0, typed + key, allEntries); });
+            });
+            bind('delete', [], function () { choices(allEntries, title, space, windows, choose, 0, typed.slice(0, -1), allEntries); });
+            bind('return', [], function () {
+                var match = entries.filter(function (entry) { return entry.selectorLabel === typed; })[0];
+                if (match) choose(match);
+            });
+            lines.push('Label: ' + (typed || '…') + ' | Return select · Backspace edit');
+        }
         if (!hint) lines.push('(no choices)');
         lines.push('Page ' + (page + 1) + '/' + pages.length + ' | ' + hint + '/' + entries.length +
                    ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
@@ -726,8 +774,8 @@ var yabaiRatpoison = (function () {
             lines.push('Shift-S/V split   Shift-F frames', 'Shift-W remove    Shift-O only     Shift-Z fullscreen',
                        'Shift-R resize   Shift-J/K stack   Shift-E sizes   Shift-C config');
         }
-        function previousPage() { choices(entries, title, space, windows, choose, page - 1); }
-        function nextPage() { choices(entries, title, space, windows, choose, page + 1); }
+        function previousPage() { choices(entries, title, space, windows, choose, page - 1, typed, extended ? allEntries : undefined); }
+        function nextPage() { choices(entries, title, space, windows, choose, page + 1, typed, extended ? allEntries : undefined); }
         bind('[', [], previousPage);
         bind(']', [], nextPage);
         bind('pageUp', [], previousPage);
@@ -735,6 +783,7 @@ var yabaiRatpoison = (function () {
         bind('space', [], nextPage);
         bind('space', ['shift'], previousPage);
         if (title === 'visible windows / frames') bind('/', [], function () { searchWindows(choose, space); });
+        if (extended) allEntries.forEach(function (entry) { pageChoices[entry.selectorLabel] = entry; });
         if (title === 'visible windows / frames') cachedChoices = Object.keys(pageChoices).reduce(function (map, key) {
             map[key] = choiceIdentity(pageChoices[key]); return map;
         }, {});
@@ -1020,7 +1069,8 @@ var yabaiRatpoison = (function () {
                 });
                 function present() {
                     var allEntries = entries.concat(covered);
-                    if (mode !== 'frames') stableShortcuts(allEntries, visible, space);
+                    if (selectorMode() !== 'focus-local') stableLabels(allEntries);
+                    else if (mode !== 'frames') stableShortcuts(allEntries, visible, space);
                     choices(allEntries, mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
                         if (entry.space.id !== space.id || entry.minimized) { visit(entry, null); return; }
                         if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
@@ -1139,7 +1189,16 @@ var yabaiRatpoison = (function () {
         else resident('update', {text:'YABAI  Loading windows…\nEsc close', theme:theme, screen:Screen.main().visibleFrame()});
         queuedChoice = null;
         load('windows');
-        if (cached) Object.keys(oldChoices).forEach(function (key) {
+        queuedPrefix = null;
+        if (cached && selectorMode() !== 'focus-local') {
+            queuedPrefix = '';
+            alphabet.split('').concat(['-']).forEach(function (key) {
+                bind(key, [], function () { queuedPrefix += key; queuedChoice = null; });
+            });
+            bind('delete', [], function () { queuedPrefix = queuedPrefix.slice(0, -1); queuedChoice = null; });
+            bind('return', [], function () { queuedChoice = oldChoices[queuedPrefix] || null; });
+        }
+        if (cached && selectorMode() === 'focus-local') Object.keys(oldChoices).forEach(function (key) {
             bind(key, [], function () { queuedChoice = oldChoices[key]; });
         });
     }
@@ -1180,6 +1239,7 @@ var yabaiRatpoison = (function () {
     Event.on('mouseDidLeftClick', function () { if (!searching) cancel(); });
     return { cancel: cancel, start: start, configure: function (options) {
         baseTheme = Object.assign({}, baseTheme, options);
+        cachedPayload = null; cachedChoices = {};
         mergeTheme();
         ++themeRevision;
     } };

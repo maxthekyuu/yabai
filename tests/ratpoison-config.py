@@ -31,6 +31,16 @@ class ConfigurationTests(unittest.TestCase):
         self.runner.start()
         self.addCleanup(self.runner.stop)
 
+    def test_selector_modes(self):
+        self.assertEqual(config.BY_KEY['prefix.selectorMode']['default'], 'focus-local')
+        for mode in ('focus-local', 'space-local', 'global'):
+            result = config.apply(self.path, 'unused', 'prefix.selectorMode', mode)
+            self.assertEqual(result['theme']['selectorMode'], mode)
+            self.assertEqual(config.theme_from(config.split_config(self.path.read_text())[2])['selectorMode'], mode)
+        self.assertEqual(self.calls, [])
+        with self.assertRaises(ValueError):
+            config.validate('prefix.selectorMode', 'unknown')
+
     def test_catalog_covers_all_native_settings(self):
         source = (ROOT/'src/message.c').read_text()
         names = re.findall(r'#define COMMAND_CONFIG_\w+\s+"([^"]+)"',source)

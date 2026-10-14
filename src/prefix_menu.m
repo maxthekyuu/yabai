@@ -207,7 +207,11 @@ static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSArray *c
 {
     NSMutableAttributedString *text = [[NSMutableAttributedString alloc] initWithString:keys attributes:@{
         NSFontAttributeName:font, NSForegroundColorAttributeName:menu_theme[@"colors"][@"hintText"] ? theme_color(@"hintText", 0) : color }];
-    for (NSUInteger i = 0; i < states.count; ++i) {
+    NSArray *labels = [keys componentsSeparatedByString:@" "];
+    NSUInteger offset = 0;
+    for (NSUInteger i = 0; i < states.count && i < labels.count; ++i) {
+        NSRange labelRange = NSMakeRange(offset, [labels[i] length]);
+        offset += labelRange.length + 1;
         NSString *state = states[i];
         if ([state isEqual:@"normal"]) continue;
         BOOL focused = [state isEqual:@"focused"];
@@ -218,7 +222,7 @@ static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSArray *c
             NSForegroundColorAttributeName:entry_color(state, i < colors.count ? colors[i] : nil, NO, color)} mutableCopy];
         if ((wanted & NSBoldFontMask) && !(actual & NSBoldFontMask)) attributes[NSStrokeWidthAttributeName] = @-2;
         if (focused && !(actual & NSItalicFontMask)) attributes[NSObliquenessAttributeName] = @0.2;
-        if (i * 2 < keys.length) [text addAttributes:attributes range:NSMakeRange(i * 2, 1)];
+        [text addAttributes:attributes range:labelRange];
     }
     return text;
 }
@@ -227,6 +231,7 @@ static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSArray *c
 @property(nonatomic, strong) NSString *keys;
 @property(nonatomic, strong) NSArray *states;
 @property(nonatomic, strong) NSArray *colors;
+@property(nonatomic, strong) NSArray *prefixes;
 @property(nonatomic, strong) NSAttributedString *styledText;
 @property(nonatomic, strong) NSDictionary *theme;
 @property(nonatomic, strong) NSFont *font;
@@ -254,7 +259,7 @@ static NSAttributedString *hint_text(NSString *keys, NSArray *states, NSArray *c
 static NSArray *hint_layout(id badges, NSFont *font)
 {
     if (!badges) return @[];
-    if (![badges isKindOfClass:NSArray.class] || [badges count] > 32) return nil;
+    if (![badges isKindOfClass:NSArray.class] || [badges count] > 4096) return nil;
     NSMutableArray *groups = [NSMutableArray array];
     CGFloat primaryHeight = CGDisplayBounds(CGMainDisplayID()).size.height;
     for (id badge in badges) {
@@ -263,9 +268,11 @@ static NSArray *hint_layout(id badges, NSFont *font)
         if (!entry_state_valid(state) || (badge[@"color"] && !theme_hex_valid(badge[@"color"]))) return nil;
         NSString *key = badge[@"key"];
         NSDictionary *rect = badge[@"rect"];
-        if (![key isKindOfClass:NSString.class] || key.length != 1 ||
-            [@"0123456789abcdefgimnopqrstuvwxyz" rangeOfString:key].location == NSNotFound ||
+        if (![key isKindOfClass:NSString.class] || key.length == 0 || key.length > 64 ||
+            [key rangeOfCharacterFromSet:[[NSCharacterSet characterSetWithCharactersInString:@"0123456789abcdefgimnopqrstuvwxyz-"] invertedSet]].location != NSNotFound ||
             ![badge[@"display"] isKindOfClass:NSNumber.class]) return nil;
+        NSString *prefix = badge[@"prefix"] ?: @"";
+        if (![prefix isKindOfClass:NSString.class] || (prefix.length && ![key hasPrefix:prefix])) return nil;
         // Display reconfiguration can temporarily invalidate individual window
         // or frame rectangles. Hints are optional: preserve the chooser and
         // other labels instead of failing the entire renderer.
@@ -287,8 +294,9 @@ static NSArray *hint_layout(id badges, NSFont *font)
         if (match) {
             match[@"keys"] = [match[@"keys"] stringByAppendingFormat:@" %@", key];
             [match[@"states"] addObject:state];
+            [match[@"prefixes"] addObject:prefix];
             [match[@"colors"] addObject:badge[@"color"] ?: NSNull.null];
-        } else [groups addObject:[@{ @"keys":key, @"states":[NSMutableArray arrayWithObject:state], @"colors":[NSMutableArray arrayWithObject:badge[@"color"] ?: NSNull.null], @"cx":@(x), @"cy":@(y), @"display":badge[@"display"] } mutableCopy]];
+        } else [groups addObject:[@{ @"keys":key, @"prefixes":[NSMutableArray arrayWithObject:prefix], @"states":[NSMutableArray arrayWithObject:state], @"colors":[NSMutableArray arrayWithObject:badge[@"color"] ?: NSNull.null], @"cx":@(x), @"cy":@(y), @"display":badge[@"display"] } mutableCopy]];
     }
     for (NSMutableDictionary *group in groups) {
         NSSize text = hint_text(group[@"keys"], group[@"states"], group[@"colors"], font, display_color([group[@"display"] unsignedIntegerValue])).size;
@@ -304,14 +312,25 @@ static PrefixHintView *hint_view(NSDictionary *hint, NSFont *font, PrefixHintVie
 {
     NSColor *color = display_color([hint[@"display"] unsignedIntegerValue]);
     if (existing && [existing.keys isEqual:hint[@"keys"]] && [existing.states isEqual:hint[@"states"]] &&
-        [existing.colors isEqual:hint[@"colors"]] && [existing.font isEqual:font] && [existing.color isEqual:color] && [existing.theme isEqual:menu_theme]) return existing;
+        [existing.colors isEqual:hint[@"colors"]] && [existing.prefixes isEqual:hint[@"prefixes"]] && [existing.font isEqual:font] && [existing.color isEqual:color] && [existing.theme isEqual:menu_theme]) return existing;
     PrefixHintView *view = existing ?: [[PrefixHintView alloc] initWithFrame:NSZeroRect];
     view.frame = NSMakeRect(0, 0, [hint[@"width"] doubleValue], [hint[@"height"] doubleValue]);
     view.font = font; view.keys = hint[@"keys"]; view.states = hint[@"states"]; view.colors = hint[@"colors"];
     NSUInteger display = [hint[@"display"] unsignedIntegerValue];
     view.color = display_color(display);
     view.theme = menu_theme;
-    view.styledText = hint_text(view.keys, view.states, view.colors, font, view.color);
+    view.prefixes = hint[@"prefixes"];
+    NSMutableAttributedString *styled = [hint_text(view.keys, view.states, view.colors, font, view.color) mutableCopy];
+    NSArray *labels = [view.keys componentsSeparatedByString:@" "];
+    NSUInteger offset = 0;
+    for (NSUInteger i = 0; i < labels.count; ++i) {
+        NSUInteger length = i < view.prefixes.count ? [view.prefixes[i] length] : 0;
+        if (length) [styled addAttributes:@{NSForegroundColorAttributeName:theme_color(@"accent", 0xffff55),
+            NSBackgroundColorAttributeName:theme_color(@"selectionBackground", 0x004444),
+            NSUnderlineStyleAttributeName:@(NSUnderlineStyleSingle)} range:NSMakeRange(offset, length)];
+        offset += [labels[i] length] + 1;
+    }
+    view.styledText = styled;
     [view setNeedsDisplay:YES];
     return view;
 }

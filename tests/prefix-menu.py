@@ -320,6 +320,16 @@ class PrefixMenuTests(unittest.TestCase):
                                      json.dumps(payload)], check=True, capture_output=True, text=True)
             self.assertEqual(json.loads(result.stdout)['search'], {})
 
+    def test_multicharacter_prefix_labels(self):
+        rect = dict(x=0, y=0, w=400, h=300)
+        metrics = self.render('prefix-multichar.png', 'YABAI\nLabel: 0 | Return select\n0 00 01',
+            dict(x=0,y=0,width=1400,height=1000), badges=[
+                dict(key=key, prefix='0', display=1, rect=rect, state=state)
+                for key,state in [('0','focused'),('00','front'),('01','covered')]])
+        self.assertEqual(metrics['badges'][0]['keys'], '0 00 01')
+        self.assertEqual(metrics['badges'][0]['prefixes'], ['0','0','0'])
+        self.assertTrue((OUTPUT/'prefix-multichar.png.hint.png').exists())
+
     def test_invalid_payload(self):
         for value in [json.dumps({'text':'test','highlights':[{'line':0,'start':0,'length':1,'state':'covered','color':'red'}]}),
                       json.dumps({'text':'test','badges':[{'key':'0','display':1,'state':'covered','color':'red','rect':{'x':0,'y':0,'w':100,'h':100}}]}),

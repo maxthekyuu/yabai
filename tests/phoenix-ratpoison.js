@@ -709,3 +709,60 @@ for (const bad of [{version:2}, {...snapshot(),windows:{}}, {...snapshot(),displ
     press('escape'); idle();
 }
 console.log('Compact snapshot schema validation and single-request chooser passed');
+
+// Both stable modes preserve labels across display focus changes and frame mode.
+for (const selectorMode of ['global', 'space-local']) {
+    resetShortcuts(); context.yabaiRatpoison.configure({selectorMode});
+    const remoteWindows = [{id:300,app:'Remote',title:'Remote',frame:{x:1000,y:0,w:100,h:100}}];
+    press('s',['cmd']); reply(snapshot(space,windows,[remote],{[remote.id]:remoteWindows}));
+    const firstLabels = lastMenu.badges.map(b=>b.key).sort();
+    const terminalLabel = lastMenu.badges.find(b=>b.state==='focused').key;
+    assert.equal(new Set(firstLabels).size,firstLabels.length);
+    for (const c of terminalLabel) press(c);
+    assert.equal(tasks.length,0,'typing never selects before Return');
+    assert.ok(lastMenu.badges.every(b=>b.key.startsWith(terminalLabel) && b.prefix===terminalLabel));
+    assert.ok(lastMenu.highlights.some(h=>h.length===terminalLabel.length && h.color==='#ffff55'));
+    press('return'); expectCommand(['window','--focus','10']); reply(null);
+    press('s',['cmd']); reply(snapshot(remote,remoteWindows,[{...space,'has-focus':false}],{[space.id]:windows}));
+    assert.deepEqual(lastMenu.badges.map(b=>b.key).sort(),firstLabels);
+    press('escape');
+    press('s',['cmd']); reply(snapshot(space,windows));
+    press('f',['shift']); reply(snapshot(space,windows));
+    const emptyLabel = lastMenu.badges.find(b=>b.state==='empty').key;
+    assert.ok(firstLabels.includes(emptyLabel),'empty frame keeps its label in frame mode');
+    for (const c of emptyLabel) press(c);
+    press('delete');
+    assert.ok(lastMenu.badges.every(b=>b.key.startsWith(emptyLabel.slice(0,-1))));
+    press('escape');
+}
+// Multiple pages and shared prefixes: 0 and 00 remain independently selectable.
+resetShortcuts(); context.yabaiRatpoison.configure({selectorMode:'global'});
+const manyWindows = Array.from({length:65},(_,i)=>({id:1000+i,app:'App',title:String(i),frame:{x:i*10,y:0,w:100,h:100}}));
+press('s',['cmd']); reply(snapshot(remote,manyWindows));
+assert.equal(lastMenu.badges.length,65,'all visible labels survive pagination');
+assert.ok(lastMenu.badges.some(b=>b.key==='00'));
+press('0');
+assert.ok(lastMenu.badges.some(b=>b.key==='0'));
+assert.ok(lastMenu.badges.some(b=>b.key==='00'));
+assert.ok(lastMenu.badges.every(b=>b.key.startsWith('0')));
+assert.equal(tasks.length,0);
+press('0'); assert.equal(lastMenu.badges.length,1);
+press('return'); assert.equal(tasks[0].args[2],'--focus'); reply(null);
+press('s',['cmd']); reply(snapshot(remote,manyWindows));
+press('z'); press('z'); press('z');
+assert.equal(lastMenu.badges.length,0);
+press('return'); assert.equal(tasks.length,0,'unmatched prefix never selects');
+press('delete'); press('delete'); press('delete'); assert.equal(lastMenu.badges.length,65);
+press('escape');
+console.log('Configurable stable labels, focus changes, frame identity, prefix filtering and Return confirmation passed');
+// Buffered multicharacter input waits for refreshed target identity validation.
+press('s',['cmd']); press('0'); press('0'); press('return');
+assert.ok(tasks.every(t=>t.args.includes('--menu-snapshot')));
+reply(snapshot(remote,manyWindows));
+assert.equal(tasks[0].args[2],'--focus'); reply(null);
+press('s',['cmd']); press('0'); press('delete'); press('0');
+reply(snapshot(remote,manyWindows));
+assert.equal(tasks.length,0);
+assert.ok(lastMenu.badges.every(b=>b.key.startsWith('0')));
+press('escape');
+console.log('Cached multicharacter input is buffered and validated before selection');
