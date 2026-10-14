@@ -5,8 +5,8 @@ try { require('~/.local/state/gomao-appearance/ratpoison-state.js'); } catch (_)
 var yabaiRatpoison = (function () {
     var theme = typeof yabaiRatpoisonConfig === 'object' && yabaiRatpoisonConfig ? yabaiRatpoisonConfig : {};
     var executable = '/opt/homebrew/bin/yabai';
-    var renderer = '/Users/jkuhn/Software/yabai/bin/yabai-prefix';
-    var settingsBackend = '/Users/jkuhn/Software/yabai/scripts/ratpoison-config.py';
+    var renderer = '/Users/jkuhn/Software/yabaipoison/bin/yabai-prefix';
+    var settingsBackend = '/Users/jkuhn/Software/yabaipoison/scripts/ratpoison-config.py';
     var themeRevision = 0;
     var baseTheme = theme;
     var savedTheme = {};

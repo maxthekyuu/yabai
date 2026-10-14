@@ -171,12 +171,12 @@ After building and starting this version of yabai, add this line to your
 `~/.phoenix.js` (adjust the repository path):
 
 ```js
-require('/Users/jkuhn/Software/yabai/examples/phoenix-ratpoison.js');
+require('/Users/jkuhn/Software/yabaipoison/examples/phoenix-ratpoison.js');
 ```
 
 `make` builds both `bin/yabai` and the native `bin/yabai-prefix` renderer.
 The module uses `/opt/homebrew/bin/yabai` as its client executable and
-`/Users/jkuhn/Software/yabai/bin/yabai-prefix` as its renderer; adjust the
+`/Users/jkuhn/Software/yabaipoison/bin/yabai-prefix` as its renderer; adjust the
 `executable` and `renderer` paths at the top of the module for other installations.
 The native renderer uses an opaque black, non-activating panel: it never takes
 keyboard focus. Install **GoMono Nerd Font Mono**; the renderer uses it at
@@ -321,7 +321,7 @@ var yabaiRatpoisonConfig = {
         caret: '#ffffff', inputSelectionText: '#ffffff', inputSelectionBackground: '#005577'
     }
 };
-require('/Users/jkuhn/Software/yabai/examples/phoenix-ratpoison.js');
+require('/Users/jkuhn/Software/yabaipoison/examples/phoenix-ratpoison.js');
 ```
 
 Unspecified settings retain their defaults. `displayColors` cycles by physical
