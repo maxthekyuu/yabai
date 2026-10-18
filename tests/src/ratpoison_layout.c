@@ -55,11 +55,11 @@ TEST_FUNC(ratpoison_layout_restore_transaction,
     struct window window = {.id=123};
     if (!ratpoison_pending_members) ratpoison_pending_members = [[NSMutableDictionary alloc] init];
     ratpoison_pending_members[(NSString *)view.uuid] = [NSMutableDictionary dictionaryWithDictionary:
-        @{@123: @{@"frame":@0, @"identity":@((uintptr_t)&window)}}];
+        @{@"123": @{@"frame":@0, @"identity":@((uintptr_t)&window)}}];
     TEST_CHECK(ratpoison_layout_saved_frame(&view, &window) == view.root->left, true);
     TEST_CHECK(ratpoison_layout_saved_frame(&view, &window) == NULL, true);
     ratpoison_pending_members[(NSString *)view.uuid] = [NSMutableDictionary dictionaryWithDictionary:
-        @{@123: @{@"frame":@0, @"identity":@0}}];
+        @{@"123": @{@"frame":@0, @"identity":@0}}];
     TEST_CHECK(ratpoison_layout_saved_frame(&view, &window) == NULL, true);
     ratpoison_free_tree(view.root);
     munmap(g_temp_storage.memory, g_temp_storage.size + getpagesize());
@@ -90,9 +90,9 @@ TEST_FUNC(ratpoison_layout_reconnect_members,
     view.selected_frame = view.root->right;
     view_add_window_node(&view, &b);
     NSDictionary *saved = ratpoison_saved_members[(NSString *)view.uuid];
-    TEST_CHECK([saved[@101][@"frame"] unsignedIntValue], view.root->left->frame_id);
-    TEST_CHECK([saved[@102][@"frame"] unsignedIntValue], view.root->right->frame_id);
-    TEST_CHECK(saved[@103] != nil, true);
+    TEST_CHECK([saved[@"101"][@"frame"] unsignedIntValue], view.root->left->frame_id);
+    TEST_CHECK([saved[@"102"][@"frame"] unsignedIntValue], view.root->right->frame_id);
+    TEST_CHECK(saved[@"103"] != nil, true);
 
     /* A retained view can already contain temporary assignments when display_added arrives. */
     ratpoison_restoring_layout = true;
@@ -123,6 +123,33 @@ TEST_FUNC(ratpoison_layout_reconnect_members,
     ratpoison_restoring_layout = false;
     TEST_CHECK(ratpoison_apply_dump(&view, dump), true);
     TEST_CHECK(view_find_window_node(&view, a.id) == view.root->right, true);
+
+    /* Disk JSON survives a new daemon's object addresses, but not a reused PID. */
+    struct application app = {.pid = getpid()};
+    a.application = &app; b.application = &app; late.application = &app;
+    NSDictionary *process = ratpoison_process_identity(&a);
+    TEST_CHECK(process != nil, true);
+    NSMutableDictionary *disk = [[dump mutableCopy] autorelease];
+    disk[@"session-members"] = @{@"101": @{@"frame": @(view.root->left->frame_id), @"process": process},
+                                @"102": @{@"frame": @(view.root->right->frame_id), @"process": process},
+                                @"103": @{@"frame": @(view.root->left->frame_id), @"process": process}};
+    NSData *data = [NSJSONSerialization dataWithJSONObject:disk options:0 error:NULL];
+    disk = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:NULL];
+    TEST_CHECK(ratpoison_valid_dump(disk), true);
+    ratpoison_seed_members(&view, disk[@"session-members"]);
+    TEST_CHECK(ratpoison_apply_dump_with_members(&view, disk, disk[@"session-members"]), true);
+    TEST_CHECK(view_find_window_node(&view, a.id) == view.root->left, true);
+    TEST_CHECK(view_find_window_node(&view, b.id) == view.root->right, true);
+    ratpoison_restoring_layout = true;
+    view_remove_window_node(&view, &late);
+    ratpoison_restoring_layout = false;
+    TEST_CHECK(view_add_window_node(&view, &late) == view.root->left, true);
+    NSMutableDictionary *wrong = [[process mutableCopy] autorelease];
+    wrong[@"seconds"] = @0;
+    TEST_CHECK(ratpoison_member_matches(@{@"process": wrong}, &a), false);
+    TEST_CHECK(ratpoison_member_matches(@{@"process": process}, &a), true);
+    disk[@"session-members"] = @{@"101": @{@"frame": @0, @"process": @[]}};
+    TEST_CHECK(ratpoison_valid_dump(disk), false);
 
     ratpoison_free_tree(view.root);
     [ratpoison_saved_layouts removeObjectForKey:(NSString *)view.uuid];

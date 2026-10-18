@@ -116,6 +116,9 @@ var yabaiRatpoison = (function () {
     function pump() {
         if (sending || !pendingMessage) return;
         var message = pendingMessage; pendingMessage = null;
+        // A replacement server has no cached panel; every replay needs its payload.
+        if (message.action === 'show' || message.action === 'update' || message.action === 'prepare')
+            message.payload = message.payload || lastResidentPayload || cachedPayload;
         var epoch = residentEpoch;
         var requestStart = latencyStart;
         sending = true;
@@ -123,6 +126,8 @@ var yabaiRatpoison = (function () {
             sending = false;
             if (task.status === 0 && active && requestStart === latencyStart && message.action !== 'hide' && message.action !== 'prepare') latency('renderer-ack');
             if (task.status !== 0 && epoch === residentEpoch) {
+                if (typeof Phoenix !== 'undefined') Phoenix.log('ratpoison-renderer failure ' +
+                    JSON.stringify({action:message.action, retry:!!message.retried, status:task.status, error:task.error || ''}));
                 ++residentEpoch;
                 if (residentTask !== null) Task.terminate(residentTask);
                 residentTask = null; residentToken = null;

@@ -143,9 +143,12 @@ yabai -m config ratpoison_layout_persistence on
 yabai -m config ratpoison_session_persistence on
 ```
 
-The file is updated when structural layouts change. It stores layout structure,
-not application sessions or window IDs: apps are not launched, and windows
-return through normal window management. A newly created macOS Space has a new
+The file is updated when layouts or frame membership change. It stores the tree
+and window-to-frame assignments guarded by the owning PID and process start
+time. Surviving windows return to their frames after a yabai restart; apps are
+not launched and assignments are not reused for restarted applications. Older
+structure-only files still load, but cannot recover previously lost assignments.
+Manual `--fdump` output remains structure-only. A newly created macOS Space has a new
 UUID and therefore starts with the configured defaults. Set either option to
 `off` to disable that form of persistence.
 
@@ -524,7 +527,9 @@ remain separate interactive processes.
 
 The native client communicates over a private, owner-only Unix socket. Requests
 carry revisions; older requests cannot undo a newer hide. Phoenix coalesces
-pending updates and retries a failed connection once. The renderer exits when
+pending updates and retries a failed connection once with a complete payload.
+The client allows up to three seconds for startup and five seconds for an
+acknowledgment; failures log the action, retry status, and client diagnostic. The renderer exits when
 its Phoenix parent exits. Phoenix Storage retains the previous session token so
 a configuration reload can explicitly retire its renderer. Closing/opening the dialog does not restart yabai or
 require Accessibility approval.

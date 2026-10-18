@@ -75,6 +75,40 @@ class PrefixMenuTests(unittest.TestCase):
             process.terminate()
             process.wait(timeout=3)
 
+    def test_client_waits_for_delayed_start_and_ack(self):
+        import os, socket, threading
+        token = str(uuid.uuid4())
+        path = '/tmp/yabai-prefix-%s-%s.sock' % (os.getuid(), token)
+        errors = []
+        def serve():
+            try:
+                # Both delays exceed the old 300ms connect / 1s response limits.
+                time.sleep(0.6)
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as server:
+                    server.bind(path)
+                    server.listen(1)
+                    server.settimeout(6)
+                    with server.accept()[0] as conn:
+                        size = struct.unpack('!I', conn.recv(4))[0]
+                        data = b''
+                        while len(data) < size:
+                            data += conn.recv(size - len(data))
+                        time.sleep(1.2)
+                        conn.sendall(b'{"accepted":true}\n')
+            except Exception as error:
+                errors.append(error)
+        thread = threading.Thread(target=serve)
+        thread.start()
+        try:
+            result = subprocess.run([str(ROOT / 'bin/yabai-prefix-client'), token,
+                                     '{"action":"stats","revision":1}'],
+                                    capture_output=True, text=True, timeout=8)
+            self.assertEqual(result.returncode, 0, result.stderr)
+        finally:
+            thread.join(timeout=7)
+            Path(path).unlink(missing_ok=True)
+        self.assertFalse(errors, errors)
+
     def test_resident_socket_lifecycle(self):
         token = str(uuid.uuid4())
         process = subprocess.Popen([str(BINARY), '--serve', token])
