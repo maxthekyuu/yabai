@@ -79,7 +79,7 @@ var yabaiRatpoison = (function () {
     var sending = false, pendingMessage = null, residentEpoch = 0;
     var cachedPayload = null, preparing = false, refreshTimer = null, dataGeneration = 0;
     var normalMenu = false;
-    var cachedChoices = {}, queuedChoice = null, queuedPrefix = null;
+    var cachedChoices = {}, queuedChoice = null, queuedPrefix = null, queuedAuto = false;
     function choiceIdentity(entry) {
         return spaceIdentity(entry.space) + (entry.window !== undefined ? ":w" + entry.window : entry.frame !== undefined ? ":f" + entry.frame : ":container");
     }
@@ -650,6 +650,11 @@ var yabaiRatpoison = (function () {
         entries.sort(function (a, b) { return a.shortcut - b.shortcut; });
     }
 
+    function completeSelector(label, labels) {
+        return label.length > 0 && labels.indexOf(label) !== -1 &&
+            !labels.some(function (other) { return other.length > label.length && other.indexOf(label) === 0; });
+    }
+
     function choices(entries, title, space, windows, choose, page, typed, allEntries) {
         if (!preparing && queuedPrefix !== null) { typed = queuedPrefix; queuedPrefix = null; }
         typed = typed || '';
@@ -757,7 +762,12 @@ var yabaiRatpoison = (function () {
                     state:entry.hintState || 'normal', color:entry.hintColor};
             });
             alphabet.split('').concat(['-']).forEach(function (key) {
-                bind(key, [], function () { choices(allEntries, title, space, windows, choose, 0, typed + key, allEntries); });
+                bind(key, [], function () {
+                    var next = typed + key;
+                    if (completeSelector(next, allEntries.map(function (entry) { return entry.selectorLabel; }))) {
+                        choose(allEntries.filter(function (entry) { return entry.selectorLabel === next; })[0]);
+                    } else choices(allEntries, title, space, windows, choose, 0, next, allEntries);
+                });
             });
             bind('delete', [], function () { choices(allEntries, title, space, windows, choose, 0, typed.slice(0, -1), allEntries); });
             bind('return', [], function () {
@@ -791,7 +801,8 @@ var yabaiRatpoison = (function () {
         if (!preparing && queuedChoice !== null) {
             var wanted = queuedChoice; queuedChoice = null;
             var match = entries.filter(function (entry) { return choiceIdentity(entry) === wanted; })[0];
-            if (match) choose(match);
+            if (match && (!queuedAuto || completeSelector(typed, allEntries.map(function (entry) { return entry.selectorLabel; })))) choose(match);
+            queuedAuto = false;
         }
     }
 
@@ -1189,14 +1200,18 @@ var yabaiRatpoison = (function () {
         else resident('update', {text:'YABAI  Loading windows…\nEsc close', theme:theme, screen:Screen.main().visibleFrame()});
         queuedChoice = null;
         load('windows');
-        queuedPrefix = null;
+        queuedPrefix = null; queuedAuto = false;
         if (cached && selectorMode() !== 'focus-local') {
             queuedPrefix = '';
             alphabet.split('').concat(['-']).forEach(function (key) {
-                bind(key, [], function () { queuedPrefix += key; queuedChoice = null; });
+                bind(key, [], function () {
+                    queuedPrefix += key;
+                    queuedAuto = completeSelector(queuedPrefix, Object.keys(oldChoices));
+                    queuedChoice = queuedAuto ? oldChoices[queuedPrefix] : null;
+                });
             });
-            bind('delete', [], function () { queuedPrefix = queuedPrefix.slice(0, -1); queuedChoice = null; });
-            bind('return', [], function () { queuedChoice = oldChoices[queuedPrefix] || null; });
+            bind('delete', [], function () { queuedPrefix = queuedPrefix.slice(0, -1); queuedChoice = null; queuedAuto = false; });
+            bind('return', [], function () { queuedChoice = oldChoices[queuedPrefix] || null; queuedAuto = false; });
         }
         if (cached && selectorMode() === 'focus-local') Object.keys(oldChoices).forEach(function (key) {
             bind(key, [], function () { queuedChoice = oldChoices[key]; });

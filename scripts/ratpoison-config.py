@@ -57,7 +57,7 @@ for name in ('active_frame_border_color','inactive_frame_border_color','selected
     add(name, 'argb')
 add('external_bar', 'external_bar')
 add('prefix.selectorMode', choices='focus-local,space-local,global', group='Prefix selection', default='focus-local',
-    description='focus-local: current one-key shortcuts; space-local: stable Space-prefixed indices; global: stable shared labels. New modes require Return.')
+    description='focus-local: current one-key shortcuts; space-local: stable Space-prefixed indices; global: stable shared labels. New modes auto-select complete labels without longer matches on visible Spaces; otherwise press Return.')
 add('prefix.font', 'font', group='Prefix appearance', default='GoMono Nerd Font Mono')
 add('prefix.fontSize', 'number', group='Prefix appearance', min=6, max=36, default=12)
 add('prefix.selectionWeight', choices='bold,regular', group='Prefix appearance', default='bold')

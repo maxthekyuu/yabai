@@ -578,8 +578,8 @@ have precedence.
 | Mode | Labels and selection | Stability |
 | --- | --- | --- |
 | `focus-local` | Existing one-key shortcuts: local windows use digits, other visible Spaces use letters, with banks/pages for overflow. | Window numbers (`W0`, etc.) remain local to a Space, but shortcuts can change when focus moves to another Space. Frame-mode shortcuts are positional. |
-| `space-local` | A stable Space alias, `-`, then the local window number: `0-2`, `1-2`. Frames use `0-e7`; a floating/BSP container uses `0-c`. Type the label and press Return. | The Space alias and local numbers survive display focus changes; different Spaces can each have a local window 2. |
-| `global` | A single shared label namespace for windows, frames and containers. Type the label and press Return. | A window retains its label across focus and Space moves; frames and containers are identified within their owning Space. |
+| `space-local` | A stable Space alias, `-`, then the local window number: `0-2`, `1-2`. Frames use `0-e7`; a floating/BSP container uses `0-c`. Type the label; press Return if ambiguous. | The Space alias and local numbers survive display focus changes; different Spaces can each have a local window 2. |
+| `global` | A single shared label namespace for windows, frames and containers. Type the label; press Return if ambiguous. | A window retains its label across focus and Space moves; frames and containers are identified within their owning Space. |
 
 Global labels use `0123456789acdegimnopqstuvwxyz`, excluding keys reserved for
 layout and directional commands. Labels grow in length: `0` through `z`, then
@@ -591,8 +591,13 @@ In `space-local` and `global`, each typed character filters both menu entries
 and centered labels to matching prefixes. The matched part is highlighted;
 centered labels also underline it and add a background. Typing `0` keeps both
 `0` and `00` when present, including targets on other visible displays. Return
-selects **only an exact match**, even for a single-character label; it never
-selects a longer label merely because it is the only remaining match. Backspace
+selects **only an exact match**. Labels of any length select immediately when
+typed in full and no longer label on the visible Spaces starts with them:
+`0` auto-selects unless a label such as `00` exists; `00` auto-selects unless
+a label such as `000` exists. Labels reserved on hidden Spaces do not block
+automatic selection. An ambiguous exact label still requires Return. A unique
+partial prefix never selects a longer label. Automatic selection happens only
+when adding characters, not when deleting characters or changing pages. Backspace
 removes a character and restores matches; Escape closes the chooser. An invalid
 prefix shows no choices until edited. Existing navigation/layout commands remain
 available. Hidden Spaces have no selectable labels. Minimized windows may appear

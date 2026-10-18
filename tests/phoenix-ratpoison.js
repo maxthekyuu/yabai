@@ -719,10 +719,7 @@ for (const selectorMode of ['global', 'space-local']) {
     const terminalLabel = lastMenu.badges.find(b=>b.state==='focused').key;
     assert.equal(new Set(firstLabels).size,firstLabels.length);
     for (const c of terminalLabel) press(c);
-    assert.equal(tasks.length,0,'typing never selects before Return');
-    assert.ok(lastMenu.badges.every(b=>b.key.startsWith(terminalLabel) && b.prefix===terminalLabel));
-    assert.ok(lastMenu.highlights.some(h=>h.length===terminalLabel.length && h.color==='#ffff55'));
-    press('return'); expectCommand(['window','--focus','10']); reply(null);
+    expectCommand(['window','--focus','10']); reply(null);
     press('s',['cmd']); reply(snapshot(remote,remoteWindows,[{...space,'has-focus':false}],{[space.id]:windows}));
     assert.deepEqual(lastMenu.badges.map(b=>b.key).sort(),firstLabels);
     press('escape');
@@ -730,8 +727,8 @@ for (const selectorMode of ['global', 'space-local']) {
     press('f',['shift']); reply(snapshot(space,windows));
     const emptyLabel = lastMenu.badges.find(b=>b.state==='empty').key;
     assert.ok(firstLabels.includes(emptyLabel),'empty frame keeps its label in frame mode');
-    for (const c of emptyLabel) press(c);
-    press('delete');
+    for (const c of emptyLabel.slice(0,-1)) press(c);
+    press('z'); press('delete');
     assert.ok(lastMenu.badges.every(b=>b.key.startsWith(emptyLabel.slice(0,-1))));
     press('escape');
 }
@@ -746,17 +743,16 @@ assert.ok(lastMenu.badges.some(b=>b.key==='0'));
 assert.ok(lastMenu.badges.some(b=>b.key==='00'));
 assert.ok(lastMenu.badges.every(b=>b.key.startsWith('0')));
 assert.equal(tasks.length,0);
-press('0'); assert.equal(lastMenu.badges.length,1);
-press('return'); assert.equal(tasks[0].args[2],'--focus'); reply(null);
+press('0'); assert.equal(tasks[0].args[2],'--focus'); reply(null);
 press('s',['cmd']); reply(snapshot(remote,manyWindows));
-press('z'); press('z'); press('z');
+press('-'); press('z'); press('z');
 assert.equal(lastMenu.badges.length,0);
 press('return'); assert.equal(tasks.length,0,'unmatched prefix never selects');
 press('delete'); press('delete'); press('delete'); assert.equal(lastMenu.badges.length,65);
 press('escape');
 console.log('Configurable stable labels, focus changes, frame identity, prefix filtering and Return confirmation passed');
 // Buffered multicharacter input waits for refreshed target identity validation.
-press('s',['cmd']); press('0'); press('0'); press('return');
+press('s',['cmd']); press('0'); press('0');
 assert.ok(tasks.every(t=>t.args.includes('--menu-snapshot')));
 reply(snapshot(remote,manyWindows));
 assert.equal(tasks[0].args[2],'--focus'); reply(null);
@@ -766,3 +762,37 @@ assert.equal(tasks.length,0);
 assert.ok(lastMenu.badges.every(b=>b.key.startsWith('0')));
 press('escape');
 console.log('Cached multicharacter input is buffered and validated before selection');
+
+// A longer label appearing during refresh must block cached auto-selection.
+const largerWindows = Array.from({length:900},(_,i)=>({id:1000+i,app:'App',title:String(i),frame:{x:i,y:0,w:100,h:100}}));
+press('s',['cmd']); press('0'); press('0');
+reply(snapshot(remote,largerWindows));
+assert.equal(tasks.length,0,'new longer match prevents buffered auto-selection');
+assert.ok(lastMenu.badges.some(b=>b.key==='000'));
+press('-'); assert.equal(lastMenu.badges.length,0);
+press('delete'); assert.equal(tasks.length,0,'Backspace never auto-selects');
+press('return'); assert.equal(tasks[0].args[2],'--focus'); reply(null);
+press('s',['cmd']); reply(snapshot(remote,largerWindows));
+press('0'); press('0');
+assert.equal(tasks.length,0,'00 requires Return while 000 exists');
+press('0'); assert.equal(tasks[0].args[2],'--focus'); reply(null);
+console.log('Ambiguous exact labels wait; longest multicharacter labels auto-select, including after refresh');
+
+// Single-character ambiguity includes other visible displays, not hidden Spaces.
+resetShortcuts(); context.yabaiRatpoison.configure({selectorMode:'global'});
+press('s',['cmd']); reply(snapshot(remote,manyWindows)); press('escape');
+const secondDisplaySpace = {...desktop,'is-visible':true,display:1,type:'float'};
+press('s',['cmd']); reply(snapshot(remote,[manyWindows[0]],[secondDisplaySpace],{[desktop.id]:manyWindows.slice(1)}));
+press('0');
+assert.equal(tasks.length,0,'longer label on another visible display requires Return');
+assert.ok(lastMenu.badges.some(b=>b.key==='00' && b.display===1));
+press('return'); expectCommand(['window','--focus','1000']); reply(null);
+press('s',['cmd']); reply(snapshot(remote,[manyWindows[0]],[{...secondDisplaySpace,'is-visible':false}],{[desktop.id]:manyWindows.slice(1)}));
+assert.equal(lastMenu.badges.length,1);
+press('0'); expectCommand(['window','--focus','1000']); reply(null);
+// Cached single-character completion also waits for refreshed identity checks.
+press('s',['cmd']); press('0');
+assert.ok(tasks.every(t=>t.args.includes('--menu-snapshot')));
+reply(snapshot(remote,[manyWindows[0]]));
+expectCommand(['window','--focus','1000']); reply(null);
+console.log('Single characters auto-select unless a longer label exists on a visible display');
