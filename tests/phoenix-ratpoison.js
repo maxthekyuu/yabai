@@ -115,9 +115,8 @@ open(); press('a'); expectCommand(['space', '2', '--focus-frame', '7']); reply(n
 refresh({ ...space, frames: space.frames.map(f => ({ ...f, selected: f.id === 7 })) });
 assert.ok(lastMenu.text.includes('* F7 [empty]'));
 press('escape'); idle();
-// Arrows and vim keys are reserved, not stolen by window hint labels.
-for (const [key, direction] of [['left', 'west'], ['h', 'west'], ['down', 'south'], ['j', 'south'],
-                                ['up', 'north'], ['k', 'north'], ['right', 'east'], ['l', 'east']]) {
+// Vim keys retain immediate directional focus.
+for (const [key, direction] of [['h', 'west'], ['j', 'south'], ['k', 'north'], ['l', 'east']]) {
     open(); press(key); expectCommand(['space', '2', '--focus-frame', direction]); reply(null); refresh();
     press('escape'); idle();
 }
@@ -796,3 +795,81 @@ assert.ok(tasks.every(t=>t.args.includes('--menu-snapshot')));
 reply(snapshot(remote,[manyWindows[0]]));
 expectCommand(['window','--focus','1000']); reply(null);
 console.log('Single characters auto-select unless a longer label exists on a visible display');
+
+// Menu arrows follow rendered rows/columns, never physical window positions.
+const cursorSpace = {...remote, display:1};
+const cursorWindows = Array.from({length:6}, (_,i)=>({id:2000+i, app:'Cursor', title:'Window '+i,
+    'has-focus':i===0, frame:{x:0,y:0,w:100,h:100}}));
+function selectedText() {
+    assert.equal(lastMenu.selections.length,1);
+    const span=lastMenu.selections[0];
+    return lastMenu.text.split('\n')[span.line].slice(span.start,span.start+span.length);
+}
+open(cursorSpace,cursorWindows);
+assert.ok(selectedText().includes('Window 0'));
+for (const [key,target] of [['right',3],['down',4],['left',1],['up',0],['up',0],['left',0]]) {
+    press(key);
+    assert.ok(selectedText().includes('Window '+target),key+' selects '+target);
+    assert.equal(tasks.length,0,'arrows issue no yabai commands');
+    assert.equal(renderers.size,1);
+}
+press('down'); press('return'); expectCommand(['window','--focus','2001']); reply(null); idle();
+// Escape discards the cursor, and a new session starts at actual focus.
+open(cursorSpace,cursorWindows); press('right'); press('escape');
+press('s',['cmd']); refresh(cursorSpace,cursorWindows);
+assert.ok(selectedText().includes('Window 0')); press('escape');
+// Fast arrows and Return wait for a fresh snapshot (including edge presses).
+press('s',['cmd']); press('up'); press('right'); press('down'); press('return');
+assert.equal(tasks.length,1); expectCommand(['query','--menu-snapshot']);
+refresh(cursorSpace,cursorWindows);
+expectCommand(['window','--focus','2004']); reply(null); idle();
+// Cursor identity survives refresh; a vanished window is never confirmed.
+open(cursorSpace,cursorWindows); press('right');
+events.get('windowDidClose')();
+const refreshTimerEntry=[...timers.entries()].find(([,callback])=>callback.delay===0.08);
+timers.delete(refreshTimerEntry[0]); refreshTimerEntry[1]();
+refresh(cursorSpace,cursorWindows.filter(w=>w.id!==2003));
+press('return'); expectCommand(['window','--focus','2000']); reply(null); idle();
+// Narrow layouts have one column. Left/right stop at its edges.
+const cursorOldScreen=screen; screen={...screen,width:900};
+open(cursorSpace,cursorWindows); press('right'); assert.ok(selectedText().includes('Window 0'));
+press('down'); assert.ok(selectedText().includes('Window 1'));
+press('left'); assert.ok(selectedText().includes('Window 1')); press('escape'); screen=cursorOldScreen;
+// Extended label modes retain arrow selection and Enter confirmation.
+for (const mode of ['global','space-local']) {
+    resetShortcuts(); context.yabaiRatpoison.configure({selectorMode:mode});
+    press('s',['cmd']); refresh(cursorSpace,cursorWindows);
+    press('right'); assert.ok(selectedText().includes('Window 3'));
+    press('return'); expectCommand(['window','--focus','2003']); reply(null); idle();
+}
+console.log('Menu cursor directions, confirmation, cancellation, queued input and stale targets passed');
+
+// Cursor crosses display groups; remote confirmation closes after focus succeeds.
+visibleMenu(remote, [remoteWindows[0]]);
+press('down'); assert.ok(selectedText().includes('Remote')); assert.equal(tasks.length,0);
+press('return'); reply([single,remote]); reply(single); reply(null); reply(remote);
+expectCommand(['query','--windows','--window','30']); reply({id:30,space:3});
+expectCommand(['window','--focus','30']); reply(null); idle();
+// Confirming an empty frame also closes, without inventing a window to focus.
+open(); press('right'); assert.ok(selectedText().includes('F7 [empty]'));
+press('return'); expectCommand(['space','2','--focus-frame','7']); reply(null); idle();
+// Selection persists through a refresh even on a later page.
+open(cursorSpace,manyWindows); press(']'); press('down');
+const selectedOnSecondPage=selectedText();
+events.get('windowDidResize')();
+const cursorRefresh=[...timers.entries()].find(([,callback])=>callback.delay===0.08);
+timers.delete(cursorRefresh[0]); cursorRefresh[1](); refresh(cursorSpace,manyWindows);
+assert.equal(selectedText(),selectedOnSecondPage); assert.ok(lastMenu.text.includes('2/'));
+press('escape'); idle();
+// Escape during a pending arrow selection cannot focus when its query returns.
+press('s',['cmd']); press('down'); press('return'); press('escape');
+refresh(cursorSpace,manyWindows); assert.equal(tasks.length,0); idle();
+console.log('Remote confirmation, empty frames, page refresh and pending cancellation passed');
+
+// Cached typed-label Return still validates identity rather than a reassigned label.
+resetShortcuts(); context.yabaiRatpoison.configure({selectorMode:'global'});
+press('s',['cmd']); refresh(cursorSpace,manyWindows); press('escape');
+press('s',['cmd']); press('0'); press('return');
+refresh(cursorSpace,manyWindows.filter(w=>w.id!==1000));
+assert.equal(tasks.length,0,'a vanished cached typed target must not focus a replacement');
+press('escape'); idle();

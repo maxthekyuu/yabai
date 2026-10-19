@@ -74,6 +74,7 @@ var yabaiRatpoison = (function () {
     var searching = false;
     var generation = 0;
     var queuedDirection = null;
+    var menuCursor = null, menuCursorTitle = null, queuedMenuKeys = [];
     var client = renderer.replace(/yabai-prefix$/, 'yabai-prefix-client');
     var residentTask = null, residentToken = null, residentRevision = 0;
     var sending = false, pendingMessage = null, residentEpoch = 0;
@@ -212,6 +213,7 @@ var yabaiRatpoison = (function () {
         searching = false;
         queuedChoice = null;
         queuedDirection = null;
+        menuCursor = null; menuCursorTitle = null; queuedMenuKeys = [];
         generation += 1;
         clearKeys();
         if (transitionTimer !== null) Timer.off(transitionTimer);
@@ -462,14 +464,24 @@ var yabaiRatpoison = (function () {
         });
         [['left', 'h', 'west'], ['down', 'j', 'south'], ['up', 'k', 'north'], ['right', 'l', 'east']].forEach(function (entry) {
             function move() {
+                menuCursor = null;
                 if (space) navigate(space, windows, entry[2]);
                 else queuedDirection = entry[2];
             }
             bind(entry[0], ['shift'], function () { moveWindow(entry[2]); });
-            bind(entry[0], [], move);
+            if (!space) bind(entry[0], [], function () { queuedMenuKeys.push(entry[0]); });
             bind(entry[1], [], move);
         });
-        if (!space) return;
+        if (!space) {
+            bind('return', [], function () {
+                if (queuedPrefix && !queuedMenuKeys.length) {
+                    // Preserve the cached label's identity until fresh validation.
+                    queuedChoice = cachedChoices[queuedPrefix] || null;
+                    queuedAuto = false;
+                } else queuedMenuKeys.push('return');
+            });
+            return;
+        }
         bind('t', ['shift'], function () {
             setLayout(space, space.type === 'ratpoison' ? 'float' : 'ratpoison');
         });
@@ -723,9 +735,30 @@ var yabaiRatpoison = (function () {
         }
         });
         if (!pages.length) pages.push([]);
+        if (page === undefined) {
+            page = 0;
+            if (!preparing && menuCursorTitle === title && menuCursor) pages.some(function (groups, index) {
+                if (!groups.some(function (group) { return group.entries.some(function (entry) {
+                    return choiceIdentity(entry) === menuCursor;
+                }); })) return false;
+                page = index; return true;
+            });
+        }
         page = (page + pages.length) % pages.length;
         var lines = [clip('YABAI  ' + space.type + '  |  ' + title + '  |  ' + (page + 1) + '/' + pages.length, width),
                      clip('r ratpoison   f floating   b bsp   Shift-T toggle', width), ''];
+        var pageEntries = [].concat.apply([], pages[page].map(function (group) { return group.entries; }));
+        var cursor = !preparing && menuCursorTitle === title && pageEntries.filter(function (entry) {
+            return choiceIdentity(entry) === menuCursor;
+        })[0];
+        if (!preparing && !cursor) menuCursor = null;
+        cursor = cursor || pageEntries.filter(function (entry) { return typed && entry.selectorLabel === typed; })[0] ||
+            pageEntries.filter(function (entry) { return entry.selected; })[0] || pageEntries[0];
+        if (!preparing) {
+            menuCursorTitle = title;
+        }
+        function selected(entry) { return entry === cursor; }
+        var positions = [];
         var groups = [], badges = [], selections = [], highlights = [], hint = 0, pageChoices = {};
         pages[page].forEach(function (group) {
             var start = lines.length;
@@ -739,17 +772,18 @@ var yabaiRatpoison = (function () {
                 if (entry.rect && (!entry.space || entry.space.id === space.id || entry.space['is-visible'])) {
                     badges.push({ key: key, rect: entry.rect, display: group.display, state: entry.hintState || "normal", color:entry.hintColor });
                 }
-                return clip((entry.selected ? '> ' : '  ') + key + ' ' + entry.label, columnWidth);
+                return clip((selected(entry) ? '> ' : '  ') + key + ' ' + entry.label, columnWidth);
             });
             var usedRows = Math.ceil(cells.length / columns);
             for (var row = 0; row < usedRows; ++row) {
                 var line = cells[row];
                 if (cells[row + usedRows]) line = line.padEnd(columnWidth + 3, ' ') + cells[row + usedRows];
-                if (group.entries[row].selected) selections.push({ line: lines.length, start: 2, length: cells[row].length });
-                if (group.entries[row + usedRows] && group.entries[row + usedRows].selected)
+                if (selected(group.entries[row])) selections.push({ line: lines.length, start: 2, length: cells[row].length });
+                if (group.entries[row + usedRows] && selected(group.entries[row + usedRows]))
                     selections.push({ line: lines.length, start: 2 + columnWidth + 3, length: cells[row + usedRows].length });
                 [row, row + usedRows].forEach(function (index, column) {
                     var entry = group.entries[index];
+                    if (entry) positions.push({entry:entry, x:column, y:lines.length});
                     if (entry && entry.hintState) highlights.push({line:lines.length,
                         start:2 + column * (columnWidth + 3), length:cells[index].length, state:entry.hintState, color:entry.hintColor});
                     if (entry && extended && typed) highlights.push({line:lines.length,
@@ -768,27 +802,49 @@ var yabaiRatpoison = (function () {
             });
             alphabet.split('').concat(['-']).forEach(function (key) {
                 bind(key, [], function () {
+                    menuCursor = null;
                     var next = typed + key;
                     if (completeSelector(next, allEntries.map(function (entry) { return entry.selectorLabel; }))) {
                         choose(allEntries.filter(function (entry) { return entry.selectorLabel === next; })[0]);
                     } else choices(allEntries, title, space, windows, choose, 0, next, allEntries);
                 });
             });
-            bind('delete', [], function () { choices(allEntries, title, space, windows, choose, 0, typed.slice(0, -1), allEntries); });
-            bind('return', [], function () {
-                var match = entries.filter(function (entry) { return entry.selectorLabel === typed; })[0];
-                if (match) choose(match);
-            });
+            bind('delete', [], function () { menuCursor = null; choices(allEntries, title, space, windows, choose, 0, typed.slice(0, -1), allEntries); });
             lines.push('Label: ' + (typed || '…') + ' | Return select · Backspace edit');
         }
         if (!hint) lines.push('(no choices)');
         lines.push('Page ' + (page + 1) + '/' + pages.length + ' | ' + hint + '/' + entries.length +
                    ' choices | ' + pages[page].length + '/' + displayIds.length + ' displays');
-        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'hjkl/arrows focus  Shift-arrows move window', 'Shift-F frames  Shift-M move  Shift-C config');
+        lines.push('', '[ / PgUp prev   ] / PgDn / Space next   / search   Esc close', 'Arrows select · Enter confirm · hjkl focus · Shift-arrows move', 'Shift-F frames  Shift-M move  Shift-C config');
         if (space.type === 'ratpoison') {
             lines.push('Shift-S/V split   Shift-F frames', 'Shift-W remove    Shift-O only     Shift-Z fullscreen',
                        'Shift-R resize   Shift-J/K stack   Shift-E sizes   Shift-C config');
         }
+        function moveCursor(direction) {
+            var origin = positions.filter(function (position) { return position.entry === cursor; })[0];
+            if (!origin) return;
+            var horizontal = direction === 'left' || direction === 'right';
+            var sign = direction === 'left' || direction === 'up' ? -1 : 1;
+            var best = null, bestCross = Infinity, bestDistance = Infinity;
+            positions.forEach(function (position) {
+                var delta = horizontal ? position.x - origin.x : position.y - origin.y;
+                var cross = Math.abs(horizontal ? position.y - origin.y : position.x - origin.x);
+                if (delta * sign <= 0) return;
+                if (cross < bestCross || (cross === bestCross && Math.abs(delta) < bestDistance)) {
+                    best = position; bestCross = cross; bestDistance = Math.abs(delta);
+                }
+            });
+            if (!best) return;
+            menuCursor = choiceIdentity(best.entry);
+            choices(entries, title, space, windows, choose, page, typed, extended ? allEntries : undefined);
+        }
+        ['left', 'down', 'up', 'right'].forEach(function (key) {
+            bind(key, [], function () { moveCursor(key); });
+        });
+        function confirmCursor() {
+            if (cursor) choose(cursor, true);
+        }
+        bind('return', [], confirmCursor);
         function previousPage() { choices(entries, title, space, windows, choose, page - 1, typed, extended ? allEntries : undefined); }
         function nextPage() { choices(entries, title, space, windows, choose, page + 1, typed, extended ? allEntries : undefined); }
         bind('[', [], previousPage);
@@ -803,6 +859,16 @@ var yabaiRatpoison = (function () {
             map[key] = choiceIdentity(pageChoices[key]); return map;
         }, {});
         show(lines.map(function (line) { return clip(line, width); }).join('\n'), null, groups, badges, null, null, selections, title === 'visible windows / frames', highlights);
+        if (!preparing && queuedMenuKeys.length) {
+            var pendingKey = queuedMenuKeys.shift();
+            if (pendingKey === 'return') { queuedMenuKeys = []; confirmCursor(); }
+            else {
+                moveCursor(pendingKey);
+                // Edge presses also consume their queue and allow confirmation.
+                if (queuedMenuKeys.length) choices(entries, title, space, windows, choose, page, typed, extended ? allEntries : undefined);
+            }
+            return;
+        }
         if (!preparing && queuedChoice !== null) {
             var wanted = queuedChoice; queuedChoice = null;
             var match = entries.filter(function (entry) { return choiceIdentity(entry) === wanted; })[0];
@@ -876,7 +942,8 @@ var yabaiRatpoison = (function () {
         });
     }
 
-    function visit(entry, source) {
+    function visit(entry, source, closeAfter) {
+        function finished() { if (closeAfter) cancel(); else load('windows'); }
         var current = ++generation;
         clearKeys();
         bind('escape', [], cancel);
@@ -923,14 +990,14 @@ var yabaiRatpoison = (function () {
                     }
                 }
                 function focusWindow() {
-                    if (source) request(['window', '--focus', String(source.id)], function () { load('windows'); });
+                    if (source) request(['window', '--focus', String(source.id)], finished);
                     else if (entry.window !== undefined) {
                         request(['query', '--windows', '--window', String(entry.window)], function (task) {
                             var window;
                             try { window = JSON.parse(task.output); } catch (_) {}
                             if (!window || window.space !== target.index) { error('window is no longer in that container'); return; }
                             function selectWindow() {
-                                request(['window', '--focus', String(entry.window)], function () { load('windows'); });
+                                request(['window', '--focus', String(entry.window)], finished);
                             }
                             // Select its existing frame first: remote selection must
                             // not recall a covered window into a different empty frame.
@@ -950,8 +1017,8 @@ var yabaiRatpoison = (function () {
                             } else restoreFocus();
                         });
                     } else if (entry.frame !== undefined) {
-                        request(['space', String(target.index), '--focus-frame', String(entry.frame)], function () { load('windows'); });
-                    } else load('windows');
+                        request(['space', String(target.index), '--focus-frame', String(entry.frame)], finished);
+                    } else finished();
                 }
                 var arrival = focusWindow;
                 function focusSpace() {
@@ -1087,12 +1154,12 @@ var yabaiRatpoison = (function () {
                     var allEntries = entries.concat(covered);
                     if (selectorMode() !== 'focus-local') stableLabels(allEntries);
                     else if (mode !== 'frames') stableShortcuts(allEntries, visible, space);
-                    choices(allEntries, mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry) {
-                        if (entry.space.id !== space.id || entry.minimized) { visit(entry, null); return; }
-                        if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)]);
+                    choices(allEntries, mode === 'frames' ? 'visible frames / containers' : 'visible windows / frames', space, windows, function (entry, confirmed) {
+                        if (entry.space.id !== space.id || entry.minimized) { visit(entry, null, confirmed); return; }
+                        if (entry.frame !== undefined) update(['space', String(space.index), '--focus-frame', String(entry.frame)], confirmed ? cancel : undefined);
                         else if (entry.window !== undefined) command(['window', '--focus', String(entry.window)]);
-                        else load('windows');
-                    }, 0);
+                        else if (confirmed) cancel(); else load('windows');
+                    });
                 }
                 if (!entries.some(function (entry) { return entry.container; })) { present(); return; }
                 read(['query', '--displays'], function (task) {
@@ -1216,7 +1283,6 @@ var yabaiRatpoison = (function () {
                 });
             });
             bind('delete', [], function () { queuedPrefix = queuedPrefix.slice(0, -1); queuedChoice = null; queuedAuto = false; });
-            bind('return', [], function () { queuedChoice = oldChoices[queuedPrefix] || null; queuedAuto = false; });
         }
         if (cached && selectorMode() === 'focus-local') Object.keys(oldChoices).forEach(function (key) {
             bind(key, [], function () { queuedChoice = oldChoices[key]; });

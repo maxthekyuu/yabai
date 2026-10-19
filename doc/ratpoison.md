@@ -198,7 +198,9 @@ Press **Super-S (Command-S)**, release it, then choose:
 | `0`–`9` | Select a numbered window in the active Space (current bank) |
 | `Shift-C` | Open searchable configuration; Save applies and persists a setting |
 | Other displayed digits/letters | Select that window or empty frame |
-| Arrows or `h/j/k/l` | Focus west/south/north/east, including empty frames |
+| Arrows | Move the highlighted selection through the menu rows and columns without changing focus |
+| Enter | Focus the highlighted window or select its frame, then close the menu |
+| `h/j/k/l` | Focus west/south/north/east immediately, including empty frames |
 | `Shift-Arrows` | Move the focused window to the neighboring frame and keep the menu open |
 | `Shift-S` | Split horizontally (top/bottom) |
 | `Shift-V` | Split vertically (left/right) |
@@ -390,11 +392,15 @@ an empty floating/BSP Space appears as an empty container. Hidden virtual
 desktops remain available through `Shift-U`.
 
 Selecting a remote entry activates its Space, then focuses its window or selects
-its empty frame. The menu stays open on that destination so layout keys and frame
+its empty frame. When chosen by label, the menu stays open on that destination so layout keys and frame
 commands apply there. Covered stack windows stay in their existing remote frame;
 local empty-frame recall behavior is unchanged. `Shift-F` lists frames and Space
-containers across the same visible Spaces, from any layout. Arrow/hjkl navigation
-continues to operate within the active Space. Use selection labels to cross displays.
+containers across the same visible Spaces, from any layout. Arrow keys move the
+menu highlight across its displayed rows and columns, including other display
+groups. Enter confirms that selection and closes the menu; Escape discards it.
+At a page edge the selection stops; use the existing page keys for other pages.
+The highlight starts on the selected entry when it is on the page, otherwise the
+first entry. `h/j/k/l` still change focus immediately within the active Space.
 
 
 Display and Space containers are available in every layout. `Super-S`, then
